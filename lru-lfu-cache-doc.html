@@ -1,0 +1,2769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LRU & LFU Cache — System Design Documentation</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+  --bg-code: #0D1117;
+  --bg-card: #ffffff;
+  --bg-nav: #ffffff;
+  --bg-topbar: rgba(255,255,255,0.85);
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #94a3b8;
+  --text-code: #e6edf3;
+  --border-primary: #e2e8f0;
+  --border-secondary: #f1f5f9;
+  --indigo: #6366f1;
+  --indigo-light: #e0e7ff;
+  --indigo-dark: #4338ca;
+  --violet: #8b5cf6;
+  --violet-light: #ede9fe;
+  --emerald: #10b981;
+  --emerald-light: #d1fae5;
+  --amber: #f59e0b;
+  --amber-light: #fef3c7;
+  --rose: #f43f5e;
+  --rose-light: #ffe4e6;
+  --sky: #0ea5e9;
+  --sky-light: #e0f2fe;
+  --teal: #14b8a6;
+  --teal-light: #ccfbf1;
+  --cyan: #06b6d4;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --nav-width: 270px;
+  --topbar-height: 56px;
+  --progress-gradient: linear-gradient(90deg, var(--indigo), var(--violet), var(--sky));
+}
+
+[data-theme="dark"] {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --bg-code: #0D1117;
+  --bg-card: #1e293b;
+  --bg-nav: #1e293b;
+  --bg-topbar: rgba(30,41,59,0.85);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-code: #e6edf3;
+  --border-primary: #334155;
+  --border-secondary: #1e293b;
+  --indigo-light: rgba(99,102,241,0.15);
+  --violet-light: rgba(139,92,246,0.15);
+  --emerald-light: rgba(16,185,129,0.15);
+  --amber-light: rgba(245,158,11,0.15);
+  --rose-light: rgba(244,63,94,0.15);
+  --sky-light: rgba(14,165,233,0.15);
+  --teal-light: rgba(20,184,166,0.15);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.4);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+/* Progress Bar */
+#progress-bar {
+  position: fixed; top: 0; left: 0; height: 3px; z-index: 9999;
+  background: var(--progress-gradient);
+  transform-origin: left; transform: scaleX(0);
+  transition: transform 0.1s linear;
+}
+
+/* Top Bar */
+.topbar {
+  position: fixed; top: 0; left: var(--nav-width); right: 0;
+  height: var(--topbar-height);
+  background: var(--bg-topbar);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-primary);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 24px; z-index: 100;
+}
+.topbar-title { font-weight: 700; font-size: 0.95rem; color: var(--text-primary); }
+.topbar-right { display: flex; align-items: center; gap: 8px; }
+.topbar-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600;
+  background: var(--indigo-light); color: var(--indigo);
+}
+.topbar-btn {
+  width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border-primary);
+  background: var(--bg-card); color: var(--text-secondary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; transition: all 0.15s;
+}
+.topbar-btn:hover { border-color: var(--indigo); color: var(--indigo); }
+.topbar-btn svg { width: 18px; height: 18px; }
+
+/* Navigation */
+nav {
+  position: fixed; top: 0; left: 0; bottom: 0; width: var(--nav-width);
+  background: var(--bg-nav); border-right: 1px solid var(--border-primary);
+  display: flex; flex-direction: column; z-index: 200;
+  overflow: hidden;
+}
+.nav-header {
+  padding: 16px 20px; border-bottom: 1px solid var(--border-primary);
+  flex-shrink: 0;
+}
+.nav-logo {
+  font-size: 0.85rem; font-weight: 800; color: var(--indigo);
+  display: flex; align-items: center; gap: 8px;
+}
+.nav-logo-icon {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--indigo), var(--violet));
+  display: flex; align-items: center; justify-content: center;
+}
+.nav-logo-icon svg { width: 16px; height: 16px; stroke: white; }
+.nav-body { flex: 1; overflow-y: auto; padding: 12px 0; }
+.nav-body::-webkit-scrollbar { width: 4px; }
+.nav-body::-webkit-scrollbar-thumb { background: var(--border-primary); border-radius: 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 20px; font-size: 0.82rem; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.15s; text-decoration: none; border: none; background: none; width: 100%; text-align: left;
+}
+.nav-item:hover { color: var(--indigo); background: var(--indigo-light); }
+.nav-item.active { color: var(--indigo); background: var(--indigo-light); font-weight: 600; }
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; }
+.nav-group-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 20px; font-size: 0.82rem; font-weight: 500;
+  color: var(--text-secondary); cursor: pointer;
+  transition: all 0.15s; border: none; background: none; width: 100%; text-align: left;
+}
+.nav-group-header:hover { color: var(--indigo); background: var(--indigo-light); }
+.nav-group-header.active { color: var(--indigo); background: var(--indigo-light); font-weight: 600; }
+.nav-group-header svg.nav-icon { width: 16px; height: 16px; flex-shrink: 0; stroke: currentColor; }
+.nav-chevron {
+  width: 14px; height: 14px; margin-left: auto; transition: transform 0.2s;
+  stroke: currentColor; flex-shrink: 0;
+}
+.nav-chevron.open { transform: rotate(90deg); }
+.nav-badge {
+  margin-left: auto; font-size: 0.65rem; font-weight: 600;
+  background: var(--bg-tertiary); color: var(--text-tertiary);
+  padding: 1px 6px; border-radius: 10px;
+}
+.nav-group-header .nav-badge { margin-left: 0; }
+.nav-subitems {
+  overflow: hidden; max-height: 0; transition: max-height 0.3s ease;
+  border-left: 2px solid var(--border-primary); margin-left: 34px;
+}
+.nav-subitems.open { max-height: 2000px; }
+.nav-subitem {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 16px; font-size: 0.78rem; color: var(--text-tertiary);
+  cursor: pointer; transition: all 0.15s; text-decoration: none;
+  border: none; background: none; width: 100%; text-align: left;
+}
+.nav-subitem:hover { color: var(--indigo); }
+.nav-subitem.active { color: var(--indigo); font-weight: 500; }
+.nav-subitem::before {
+  content: ''; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--text-tertiary); flex-shrink: 0;
+  transition: all 0.15s;
+}
+.nav-subitem:hover::before, .nav-subitem.active::before {
+  background: var(--indigo); transform: scale(1.3);
+}
+.nav-footer {
+  padding: 12px 20px; border-top: 1px solid var(--border-primary);
+  display: flex; gap: 8px; flex-shrink: 0;
+}
+.nav-footer-btn {
+  flex: 1; padding: 6px; border-radius: 6px; font-size: 0.72rem; font-weight: 500;
+  border: 1px solid var(--border-primary); background: var(--bg-card);
+  color: var(--text-secondary); cursor: pointer; transition: all 0.15s;
+}
+.nav-footer-btn:hover { border-color: var(--indigo); color: var(--indigo); }
+
+/* Main Content */
+.main-content {
+  margin-left: var(--nav-width);
+  padding-top: var(--topbar-height);
+  width: calc(100vw - var(--nav-width));
+}
+.content-wrapper { padding: 32px 40px 80px; }
+
+/* Hero */
+.hero {
+  background: linear-gradient(135deg, #312e81, #4338ca, #6366f1);
+  border-radius: 16px; padding: 48px; color: white; margin-bottom: 32px;
+  position: relative; overflow: hidden;
+}
+.hero::before {
+  content: ''; position: absolute; top: -50%; right: -20%; width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-radius: 50%;
+}
+.hero-title { font-size: 2.2rem; font-weight: 800; margin-bottom: 8px; position: relative; }
+.hero-subtitle { font-size: 1.05rem; opacity: 0.85; margin-bottom: 20px; position: relative; max-width: 700px; }
+.hero-tags { display: flex; flex-wrap: wrap; gap: 8px; position: relative; }
+.hero-tag {
+  padding: 5px 14px; border-radius: 20px; font-size: 0.78rem; font-weight: 500;
+  background: rgba(255,255,255,0.15); backdrop-filter: blur(4px);
+}
+
+/* Stat Cards */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+.stat-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 12px; padding: 20px; transition: box-shadow 0.15s, transform 0.15s;
+}
+.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.stat-label { font-size: 0.78rem; color: var(--text-tertiary); font-weight: 500; margin-bottom: 4px; }
+.stat-value { font-size: 1.5rem; font-weight: 800; color: var(--indigo); }
+.stat-desc { font-size: 0.75rem; color: var(--text-secondary); margin-top: 4px; }
+
+/* Section */
+section { margin-bottom: 48px; }
+section > .section-anchor { display: block; position: relative; top: -80px; visibility: hidden; }
+h2 {
+  font-size: 1.6rem; font-weight: 800; margin-bottom: 24px; color: var(--text-primary);
+  display: flex; align-items: center; gap: 12px;
+}
+h2 .section-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+h2 .section-icon svg { width: 20px; height: 20px; stroke: white; }
+h3 {
+  font-size: 1.15rem; font-weight: 700; margin: 28px 0 16px; color: var(--text-primary);
+  padding-bottom: 8px; border-bottom: 2px solid var(--border-secondary);
+}
+h3 .h3-anchor { display: block; position: relative; top: -80px; visibility: hidden; }
+h4 {
+  font-size: 1rem; font-weight: 600; margin: 20px 0 12px; color: var(--text-primary);
+}
+p { margin-bottom: 16px; color: var(--text-secondary); }
+
+/* Info Boxes */
+.info-box {
+  border-left: 4px solid var(--indigo); background: var(--indigo-light);
+  border-radius: 0 10px 10px 0; padding: 16px 20px; margin: 16px 0;
+}
+.info-box.emerald { border-left-color: var(--emerald); background: var(--emerald-light); }
+.info-box.amber { border-left-color: var(--amber); background: var(--amber-light); }
+.info-box.rose { border-left-color: var(--rose); background: var(--rose-light); }
+.info-box.violet { border-left-color: var(--violet); background: var(--violet-light); }
+.info-box.sky { border-left-color: var(--sky); background: var(--sky-light); }
+.info-box.teal { border-left-color: var(--teal); background: var(--teal-light); }
+.info-box-title { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); margin-bottom: 6px; }
+.info-box p { margin-bottom: 8px; font-size: 0.88rem; color: var(--text-primary); }
+.info-box p:last-child { margin-bottom: 0; }
+
+/* Term Definition */
+.term-def {
+  background: var(--bg-tertiary); border-left: 4px solid var(--indigo);
+  border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 14px 0;
+}
+.term-def-name { font-weight: 700; font-size: 0.88rem; color: var(--indigo); margin-bottom: 4px; }
+.term-def p { font-size: 0.85rem; margin-bottom: 0; color: var(--text-secondary); }
+
+/* Code Blocks */
+.code-block {
+  background: var(--bg-code); border-radius: 10px; margin: 16px 0;
+  overflow: hidden; position: relative;
+}
+.code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 16px; background: rgba(255,255,255,0.05);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.code-lang { font-size: 0.72rem; font-weight: 600; color: #7c8aaa; text-transform: uppercase; }
+.code-copy {
+  width: 32px; height: 32px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);
+  background: transparent; color: #7c8aaa; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: all 0.15s;
+}
+.code-block:hover .code-copy { opacity: 1; }
+.code-copy:hover { background: rgba(255,255,255,0.1); color: #c9d1d9; }
+.code-copy svg { width: 14px; height: 14px; }
+.code-copy.copied { color: var(--emerald); border-color: var(--emerald); }
+pre {
+  padding: 16px; overflow-x: auto; font-family: 'JetBrains Mono', monospace;
+  font-size: 0.82rem; line-height: 1.6; color: var(--text-code);
+}
+pre::-webkit-scrollbar { height: 6px; }
+pre::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+
+/* Syntax Highlighting */
+.kw { color: #ff7b72; } /* keywords */
+.ty { color: #79c0ff; } /* types */
+.st { color: #a5d6ff; } /* strings */
+.cm { color: #8b949e; } /* comments */
+.fn { color: #d2a8ff; } /* functions */
+.nu { color: #79c0ff; } /* numbers */
+.op { color: #ff7b72; } /* operators */
+.an { color: #ffa657; } /* annotations */
+
+/* Tables */
+.table-wrap { overflow-x: auto; margin: 16px 0; border-radius: 10px; border: 1px solid var(--border-primary); }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+thead { background: var(--indigo); color: white; }
+th { padding: 12px 16px; text-align: left; font-weight: 600; }
+td { padding: 10px 16px; border-bottom: 1px solid var(--border-primary); color: var(--text-secondary); }
+tr:nth-child(even) { background: var(--bg-secondary); }
+tr:hover td { background: var(--indigo-light); }
+
+/* Requirement Cards */
+.req-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 16px 0; }
+.req-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 10px; padding: 16px; transition: box-shadow 0.15s, transform 0.15s;
+}
+.req-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.req-card-title { font-weight: 600; font-size: 0.88rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.req-card-title svg { width: 16px; height: 16px; stroke: var(--indigo); flex-shrink: 0; }
+.req-card p { font-size: 0.82rem; color: var(--text-secondary); margin: 0; }
+
+/* Tech Cards */
+.tech-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; margin: 16px 0; }
+.tech-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 10px; padding: 18px; transition: all 0.15s;
+}
+.tech-card:hover { border-color: var(--indigo); box-shadow: var(--shadow-md); }
+.tech-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.tech-card-icon {
+  width: 36px; height: 36px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.tech-card-icon svg { width: 18px; height: 18px; stroke: white; }
+.tech-card-name { font-weight: 700; font-size: 0.9rem; }
+.tech-card-role { font-size: 0.75rem; color: var(--text-tertiary); }
+.tech-card p { font-size: 0.82rem; color: var(--text-secondary); margin: 0; }
+
+/* Subsection Cards */
+.subsection-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 12px; padding: 24px; margin: 20px 0;
+}
+.subsection-card-title {
+  font-weight: 700; font-size: 1rem; margin-bottom: 16px;
+  padding-bottom: 10px; border-bottom: 2px solid var(--border-secondary);
+}
+
+/* Flow Diagrams */
+.flow-diagram { display: flex; align-items: center; gap: 0; margin: 20px 0; flex-wrap: wrap; justify-content: center; }
+.flow-node {
+  padding: 10px 18px; border-radius: 10px; font-size: 0.82rem; font-weight: 600;
+  border: 2px solid var(--border-primary); background: var(--bg-card);
+  text-align: center; min-width: 100px;
+}
+.flow-node.indigo { border-color: var(--indigo); color: var(--indigo); }
+.flow-node.emerald { border-color: var(--emerald); color: var(--emerald); }
+.flow-node.amber { border-color: var(--amber); color: var(--amber); }
+.flow-node.rose { border-color: var(--rose); color: var(--rose); }
+.flow-node.sky { border-color: var(--sky); color: var(--sky); }
+.flow-node.violet { border-color: var(--violet); color: var(--violet); }
+.flow-arrow { color: var(--text-tertiary); font-size: 1.2rem; margin: 0 6px; }
+
+/* Comparison Grid */
+.comparison-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+.comparison-card {
+  border-radius: 10px; padding: 18px; border: 1px solid var(--border-primary);
+}
+.comparison-card.good { background: var(--emerald-light); border-color: var(--emerald); }
+.comparison-card.bad { background: var(--rose-light); border-color: var(--rose); }
+.comparison-card-title { font-weight: 700; font-size: 0.88rem; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.comparison-card.good .comparison-card-title { color: var(--emerald); }
+.comparison-card.bad .comparison-card-title { color: var(--rose); }
+.comparison-card p, .comparison-card ul { font-size: 0.84rem; color: var(--text-primary); margin-bottom: 6px; }
+.comparison-card ul { padding-left: 18px; }
+.comparison-card li { margin-bottom: 4px; }
+
+/* Math Block */
+.math-block {
+  background: var(--indigo-light); border-radius: 10px; padding: 16px 20px;
+  font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;
+  margin: 16px 0; color: var(--text-primary); line-height: 1.8;
+  border: 1px solid var(--border-primary);
+}
+
+/* Tips Grid */
+.tips-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; margin: 16px 0; }
+.tip-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 10px; padding: 16px; transition: box-shadow 0.15s, transform 0.15s;
+}
+.tip-card:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.tip-card-title { font-weight: 700; font-size: 0.85rem; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+.tip-card-title svg { width: 16px; height: 16px; stroke: var(--violet); flex-shrink: 0; }
+.tip-card p { font-size: 0.82rem; color: var(--text-secondary); margin: 0; }
+
+/* HLD Step Cards */
+.hld-steps { display: flex; flex-direction: column; gap: 12px; margin: 20px 0; }
+.hld-step {
+  display: flex; align-items: flex-start; gap: 16px;
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 10px; padding: 16px 20px;
+}
+.hld-step-num {
+  width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
+  background: var(--indigo); color: white; font-weight: 700; font-size: 0.82rem;
+  display: flex; align-items: center; justify-content: center;
+}
+.hld-step-path { font-size: 0.72rem; color: var(--text-tertiary); font-weight: 500; margin-bottom: 2px; }
+.hld-step-title { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+.hld-step-desc { font-size: 0.84rem; color: var(--text-secondary); }
+
+/* Pitfall Cards */
+.pitfall-card {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-left: 4px solid var(--rose);
+  border-radius: 0 10px 10px 0; padding: 18px 20px; margin: 14px 0;
+}
+.pitfall-card-title { font-weight: 700; font-size: 0.9rem; color: var(--rose); margin-bottom: 8px; }
+.pitfall-card p { font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 8px; }
+.pitfall-card p:last-child { margin-bottom: 0; }
+
+/* Search Modal */
+.search-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px); z-index: 1000;
+  display: none; align-items: flex-start; justify-content: center; padding-top: 15vh;
+}
+.search-overlay.open { display: flex; }
+.search-modal {
+  background: var(--bg-card); border: 1px solid var(--border-primary);
+  border-radius: 16px; width: 580px; max-height: 60vh;
+  box-shadow: var(--shadow-lg); overflow: hidden;
+}
+.search-input-wrap { padding: 16px; border-bottom: 1px solid var(--border-primary); display: flex; align-items: center; gap: 10px; }
+.search-input-wrap svg { width: 18px; height: 18px; stroke: var(--text-tertiary); flex-shrink: 0; }
+.search-input {
+  flex: 1; border: none; outline: none; background: none;
+  font-size: 0.95rem; font-family: inherit; color: var(--text-primary);
+}
+.search-input::placeholder { color: var(--text-tertiary); }
+.search-results { max-height: calc(60vh - 60px); overflow-y: auto; padding: 8px; }
+.search-result {
+  padding: 10px 14px; border-radius: 8px; cursor: pointer; transition: background 0.1s;
+}
+.search-result:hover, .search-result.active { background: var(--indigo-light); }
+.search-result-section { font-size: 0.72rem; color: var(--indigo); font-weight: 600; text-transform: uppercase; }
+.search-result-text { font-size: 0.85rem; color: var(--text-secondary); }
+.search-result-text mark { background: var(--amber-light); color: var(--text-primary); border-radius: 2px; padding: 0 2px; }
+.search-empty { padding: 20px; text-align: center; color: var(--text-tertiary); font-size: 0.85rem; }
+.search-kbd { font-size: 0.7rem; color: var(--text-tertiary); background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+
+/* Back to Top */
+.back-to-top {
+  position: fixed; bottom: 24px; right: 24px; width: 42px; height: 42px;
+  border-radius: 50%; background: var(--indigo); color: white; border: none;
+  cursor: pointer; box-shadow: var(--shadow-md); z-index: 500;
+  display: none; align-items: center; justify-content: center;
+  transition: transform 0.15s, opacity 0.15s;
+}
+.back-to-top:hover { transform: scale(1.1); }
+.back-to-top svg { width: 20px; height: 20px; }
+
+/* Print */
+@media print {
+  nav, .topbar, .back-to-top, .search-overlay, #progress-bar { display: none !important; }
+  .main-content { margin-left: 0; width: 100%; padding-top: 0; }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  nav { display: none; }
+  .main-content { margin-left: 0; width: 100%; }
+  .topbar { left: 0; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .comparison-grid { grid-template-columns: 1fr; }
+  .content-wrapper { padding: 20px 16px 60px; }
+}
+</style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+
+<nav>
+  <div class="nav-header">
+    <div class="nav-logo">
+      <div class="nav-logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+      LRU & LFU Cache
+    </div>
+  </div>
+  <div class="nav-body" id="nav-body"></div>
+  <div class="nav-footer">
+    <button class="nav-footer-btn" onclick="toggleAllNav(true)">Expand All</button>
+    <button class="nav-footer-btn" onclick="toggleAllNav(false)">Collapse All</button>
+  </div>
+</nav>
+
+<div class="topbar">
+  <span class="topbar-title">LRU & LFU Cache — System Design</span>
+  <div class="topbar-right">
+    <span class="topbar-chip">O(1) Get/Put</span>
+    <span class="topbar-chip">HashMap + DLL</span>
+    <button class="topbar-btn" onclick="openSearch()" title="Search (⌘K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    </button>
+    <button class="topbar-btn" onclick="toggleTheme()" title="Toggle Dark Mode" id="theme-toggle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+    </button>
+  </div>
+</div>
+
+<main class="main-content">
+<div class="content-wrapper">
+
+<!-- ==================== INTRODUCTION ==================== -->
+<section id="introduction">
+  <span class="section-anchor"></span>
+  <div class="hero">
+    <div class="hero-title">LRU & LFU Cache</div>
+    <div class="hero-subtitle">A deep dive into the two most important cache eviction policies — their internals, data structures, implementation, concurrency, design tradeoffs, common pitfalls, and hybrid variants. The foundational building block behind every high-performance system.</div>
+    <div class="hero-tags">
+      <span class="hero-tag">HashMap + Doubly Linked List</span>
+      <span class="hero-tag">O(1) Operations</span>
+      <span class="hero-tag">Eviction Policies</span>
+      <span class="hero-tag">Sentinel Nodes</span>
+      <span class="hero-tag">Frequency Buckets</span>
+      <span class="hero-tag">Thread Safety</span>
+      <span class="hero-tag">W-TinyLFU</span>
+      <span class="hero-tag">LeetCode 146 / 460</span>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-label">Time Complexity</div>
+      <div class="stat-value">O(1)</div>
+      <div class="stat-desc">Get, Put, and Evict for both LRU & LFU</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">LRU Structures</div>
+      <div class="stat-value">2</div>
+      <div class="stat-desc">HashMap + Doubly Linked List</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">LFU Structures</div>
+      <div class="stat-value">3</div>
+      <div class="stat-desc">KeyMap + FreqMap + minFreq tracker</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Interview Frequency</div>
+      <div class="stat-value">Top 5</div>
+      <div class="stat-desc">LeetCode 146 (LRU) & 460 (LFU)</div>
+    </div>
+  </div>
+
+  <p>Caching is the backbone of every high-performance system — from CPU L1/L2 caches to CDN edge nodes to application-layer Redis clusters. The two most critical eviction policies, <strong>LRU (Least Recently Used)</strong> and <strong>LFU (Least Frequently Used)</strong>, appear in nearly every systems interview. This document covers their internals, implementation, tradeoffs, pitfalls, and the state-of-the-art hybrid approaches that production systems actually use.</p>
+
+  <div class="info-box">
+    <div class="info-box-title">🏢 Where This Comes Up</div>
+    <p>Meta, Google, Amazon, Apple, Microsoft — virtually every company asks cache design questions. LRU (LeetCode 146) is one of the top 5 most frequently asked coding questions across all FAANG interviews. LFU (LeetCode 460) is a common hard-level follow-up.</p>
+  </div>
+</section>
+
+<!-- ==================== EVICTION POLICIES OVERVIEW ==================== -->
+<section id="eviction-policies">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--indigo), var(--violet));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg>
+    </span>
+    Cache Eviction Policies
+  </h2>
+
+  <div class="term-def" id="term-eviction-policy">
+    <div class="term-def-name">Cache Eviction Policy</div>
+    <p>A strategy that determines which entry to remove from a cache when the cache is at capacity and a new entry needs to be inserted. The policy defines the decision function — which existing entry is the "least valuable" and should be sacrificed.</p>
+  </div>
+
+  <p>A cache has limited capacity. When full and a new entry must be inserted, the cache must decide which existing entry to evict. The eviction policy defines this decision. The choice of policy fundamentally determines cache hit rates and therefore system performance.</p>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Policy</th><th>Evicts</th><th>Signal Used</th><th>Complexity</th></tr></thead>
+      <tbody>
+        <tr><td><strong>LRU</strong></td><td>Entry not accessed for the longest time</td><td>Recency of access</td><td>O(1)</td></tr>
+        <tr><td><strong>LFU</strong></td><td>Entry accessed the fewest times</td><td>Frequency of access</td><td>O(1)</td></tr>
+        <tr><td>FIFO</td><td>Oldest inserted entry</td><td>Insertion order</td><td>O(1)</td></tr>
+        <tr><td>LRU-K</td><td>Entry whose K-th most recent access is oldest</td><td>K-distance recency</td><td>O(log n)</td></tr>
+        <tr><td>ARC</td><td>Dynamically balances recency and frequency</td><td>Both signals</td><td>O(1)</td></tr>
+        <tr><td>TTL</td><td>Entry whose time limit has expired</td><td>Wall clock time</td><td>O(1) lazy</td></tr>
+        <tr><td>Random</td><td>Random entry</td><td>None (probabilistic)</td><td>O(1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box emerald">
+    <div class="info-box-title">🎯 Interview Focus</div>
+    <p>LRU and LFU are the two most frequently asked in interviews. LRU tests fundamental data structure fluency (HashMap + DLL), while LFU tests the ability to design a more complex O(1) system with frequency tracking. Know both cold — implementation, tradeoffs, pitfalls, and when to use which.</p>
+  </div>
+</section>
+
+<!-- ==================== REQUIREMENTS ==================== -->
+<section id="requirements">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--emerald), var(--teal));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    </span>
+    Requirements
+  </h2>
+
+  <h3 id="functional-requirements"><span class="h3-anchor"></span>Functional Requirements</h3>
+  <div class="req-grid">
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>get(key) → value</div>
+      <p>Retrieve the value associated with a key. Returns -1 on cache miss. Must update recency (LRU) or frequency (LFU) metadata on every access.</p>
+    </div>
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>put(key, value)</div>
+      <p>Insert or update a key-value pair. If the cache is at capacity and the key is new, evict one entry according to the eviction policy before inserting.</p>
+    </div>
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>evict()</div>
+      <p>Remove the least valuable entry. LRU: remove the entry not accessed for the longest time. LFU: remove the entry with the lowest access frequency (tie-break by LRU).</p>
+    </div>
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>O(1) All Operations</div>
+      <p>Both get() and put() (including eviction) must run in constant time. This drives the choice of data structures — HashMap for lookup, DLL for ordering.</p>
+    </div>
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Thread Safety (Extended)</div>
+      <p>Support concurrent access from multiple threads. Must handle the subtlety that LRU's get() is a write operation (mutates ordering).</p>
+    </div>
+    <div class="req-card">
+      <div class="req-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>TTL Support (Extended)</div>
+      <p>Per-entry Time-To-Live. Expired entries treated as cache misses on access. Background sweep for memory reclamation.</p>
+    </div>
+  </div>
+
+  <h3 id="non-functional-requirements"><span class="h3-anchor"></span>Non-Functional Requirements</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Property</th><th>Target</th><th>Rationale</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Latency</strong></td><td>&lt; 1μs per operation (in-process)</td><td>Cache is on the hot path — every microsecond matters. Must be faster than a network call by orders of magnitude.</td></tr>
+        <tr><td><strong>Memory Efficiency</strong></td><td>Minimal overhead per entry</td><td>On 64-bit systems (C/C++ perspective): a pointer = 8 bytes, an int = 4 bytes.<br>• LRU adds 2 pointers/entry → <strong>16 bytes</strong> overhead<br>• LFU adds 2 pointers + 1 int → <strong>20 bytes</strong> overhead<br>• On 32-bit systems: LRU = 8 bytes, LFU = 12 bytes<br><em>Note: Java adds ~12-16 bytes of object header per Node plus padding. Actual JVM overhead is higher than raw struct math.</em></td></tr>
+        <tr><td><strong>Capacity Control</strong></td><td>Count-based or byte-based limits</td><td>Count-based for uniform entries (DB rows). Byte-based for variable-size entries (HTTP responses, files).</td></tr>
+        <tr><td><strong>Concurrency</strong></td><td>Thread-safe with minimal contention</td><td>High-concurrency services need cache access from multiple threads. Lock strategy must match throughput needs.</td></tr>
+        <tr><td><strong>Correctness</strong></td><td>Never serve stale data beyond TTL</td><td>Lazy expiry (check on <code>get()</code>) is the correctness guarantee — every read passes through a freshness gate before returning. If expired, treated as a miss. There is no code path where a stale value reaches the caller. Background sweep is purely a memory optimization — it reclaims RAM from expired-but-unread entries, but removing it wouldn't cause stale reads.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== DATA MODEL ==================== -->
+<section id="data-model">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--sky), var(--cyan));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    </span>
+    Data Model
+  </h2>
+
+  <p>Each cache implementation composes a small set of data structures to achieve O(1) for all operations. The choice of structures is the core design insight that interviewers are testing.</p>
+
+  <h3 id="lru-data-structures"><span class="h3-anchor"></span>LRU Data Structures</h3>
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-card-header">
+        <div class="tech-card-icon" style="background: linear-gradient(135deg, var(--indigo), var(--violet));">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        </div>
+        <div><div class="tech-card-name">HashMap</div><div class="tech-card-role">O(1) Key Lookup</div></div>
+      </div>
+      <p>• Maps keys → DLL Nodes<br>• Provides instant access to any cache entry without traversal<br>• Pre-sized to <code>capacity / 0.75 + 1</code> to avoid rehashing</p>
+    </div>
+    <div class="tech-card">
+      <div class="tech-card-header">
+        <div class="tech-card-icon" style="background: linear-gradient(135deg, var(--emerald), var(--teal));">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><circle cx="3" cy="6" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="3" cy="18" r="1"/></svg>
+        </div>
+        <div><div class="tech-card-name">Doubly Linked List</div><div class="tech-card-role">O(1) Order Maintenance</div></div>
+      </div>
+      <p>• Maintains access recency order<br>• Head = most recently used (MRU)<br>• Tail = least recently used (LRU)<br>• Sentinel head/tail nodes eliminate null checks<br>• Supports O(1) insert, remove, and move-to-head</p>
+    </div>
+  </div>
+
+  <div class="term-def" id="term-sentinel-node">
+    <div class="term-def-name">Sentinel Node (Dummy Node)</div>
+    <p>A placeholder node at the head and tail of a doubly linked list that never holds real data. Sentinels eliminate all null-pointer checks in insert/remove operations because every real data node is guaranteed to have non-null <code>prev</code> and <code>next</code> pointers. This simplifies code and eliminates boundary-condition bugs.</p>
+  </div>
+
+  <h3 id="why-dll"><span class="h3-anchor"></span>Why a Doubly Linked List?</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card bad">
+      <div class="comparison-card-title">❌ Singly Linked List</div>
+      <p>To remove a node, you must find its <strong>predecessor</strong> — which requires O(n) traversal from the head. Even if the HashMap gives you a direct pointer to the node, you can't unlink it without knowing what comes before it.</p>
+    </div>
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ Doubly Linked List</div>
+      <p>Each node stores a <code>prev</code> pointer. Removal is just 2 pointer assignments:<br><code>node.prev.next = node.next</code><br><code>node.next.prev = node.prev</code><br>O(1) regardless of list position. This is why DLL is non-negotiable for LRU.</p>
+    </div>
+  </div>
+
+  <h3 id="why-not-alternatives"><span class="h3-anchor"></span>Why Not Alternative Data Structures?</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Alternative</th><th>Lookup</th><th>Eviction</th><th>Access Update</th><th>Why It Loses</th></tr></thead>
+      <tbody>
+        <tr><td><strong>HashMap + DLL ✅</strong></td><td>O(1)</td><td>O(1)</td><td>O(1)</td><td>Optimal — this is the answer</td></tr>
+        <tr><td>HashMap + Singly LL</td><td>O(1)</td><td>O(1)</td><td>O(n)</td><td>Can't remove node without predecessor traversal</td></tr>
+        <tr><td>HashMap + Timestamps</td><td>O(1)</td><td>O(n)</td><td>O(1)</td><td>Eviction requires scanning all entries for min timestamp</td></tr>
+        <tr><td>HashMap + Min-Heap</td><td>O(1)</td><td>O(log n)</td><td>O(log n)</td><td>Heap operations are O(log n), not O(1)</td></tr>
+        <tr><td>Circular Buffer (CLOCK)</td><td>O(1)</td><td>O(1) amort.</td><td>O(1)</td><td>Approximate LRU only — not exact ordering</td></tr>
+        <tr><td>TreeMap (sorted by time)</td><td>O(log n)</td><td>O(log n)</td><td>O(log n)</td><td>All operations are O(log n)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box">
+    <div class="info-box-title">🎯 Interview Framing</div>
+    <p>If asked "can you implement LRU without a DLL?", walk through this table. Show you know the alternatives and why each falls short. Then land on: "HashMap + DLL is the only combination that achieves O(1) for all three operations."</p>
+  </div>
+
+  <h3 id="lfu-data-structures"><span class="h3-anchor"></span>LFU Data Structures</h3>
+  <div class="tech-grid">
+    <div class="tech-card">
+      <div class="tech-card-header">
+        <div class="tech-card-icon" style="background: linear-gradient(135deg, var(--indigo), var(--violet));">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        </div>
+        <div><div class="tech-card-name">Key Map (HashMap)</div><div class="tech-card-role">O(1) Key → Node Lookup</div></div>
+      </div>
+      <p>• Maps each key → its DLL Node<br>• Identical role to LRU's HashMap<br>• Provides instant access without scanning frequency buckets</p>
+    </div>
+    <div class="tech-card">
+      <div class="tech-card-header">
+        <div class="tech-card-icon" style="background: linear-gradient(135deg, var(--amber), #d97706);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+        </div>
+        <div><div class="tech-card-name">Frequency Map (HashMap)</div><div class="tech-card-role">Frequency → DLL Buckets</div></div>
+      </div>
+      <p>• Maps each frequency count → a Doubly Linked List<br>• Groups all nodes at the same access frequency<br>• Within each bucket, nodes ordered by recency (MRU at head) for tie-breaking</p>
+    </div>
+    <div class="tech-card">
+      <div class="tech-card-header">
+        <div class="tech-card-icon" style="background: linear-gradient(135deg, var(--rose), #e11d48);">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+        </div>
+        <div><div class="tech-card-name">minFrequency Tracker</div><div class="tech-card-role">O(1) Eviction Target</div></div>
+      </div>
+      <p>• A single integer tracking the current minimum frequency<br>• Enables O(1) eviction — jump directly to lowest-frequency bucket<br>• Updated on insert (reset to 1) and on promotion from min bucket (increment by 1)<br>• Never needs to decrease or skip values</p>
+    </div>
+  </div>
+
+  <h3 id="node-structure"><span class="h3-anchor"></span>Node Structure</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ LRU Node</div>
+      <p><code>key</code> — needed to remove from HashMap on eviction</p>
+      <p><code>value</code> — the cached data</p>
+      <p><code>prev</code> — pointer to previous node in DLL</p>
+      <p><code>next</code> — pointer to next node in DLL</p>
+      <p>Overhead: ~16 bytes (two pointers on 64-bit)</p>
+    </div>
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ LFU Node</div>
+      <p><code>key</code> — needed to remove from KeyMap on eviction</p>
+      <p><code>value</code> — the cached data</p>
+      <p><code>frequency</code> — access count (starts at 1)</p>
+      <p><code>prev</code> — pointer to previous node in freq bucket DLL</p>
+      <p><code>next</code> — pointer to next node in freq bucket DLL</p>
+      <p>Overhead: ~20 bytes (two pointers + one int)</p>
+    </div>
+  </div>
+
+  <div class="info-box amber">
+    <div class="info-box-title">⚠️ Why Key Must Be Stored in Node</div>
+    <p>When evicting the tail node from the DLL, you need to also remove it from the HashMap. Without the key stored in the node, you'd need an O(n) scan of the HashMap to find which key maps to this node. Forgetting this is one of the most common implementation bugs.</p>
+  </div>
+</section>
+
+<!-- ==================== API DESIGN ==================== -->
+<section id="api-design">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--amber), #d97706);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    </span>
+    API Design
+  </h2>
+
+  <h3 id="lru-api"><span class="h3-anchor"></span>LRU Cache API</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Operation</th><th>Steps</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td><code>get(key)</code></td><td>HashMap lookup → if found, move node to head → return value</td><td>O(1)</td></tr>
+        <tr><td><code>put(key, value)</code></td><td>If key exists: update value, move to head. If new: insert at head, if over capacity evict tail</td><td>O(1)</td></tr>
+        <tr><td><code>evict()</code></td><td>Remove tail node (tail.prev), remove from HashMap</td><td>O(1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="lfu-api"><span class="h3-anchor"></span>LFU Cache API</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Operation</th><th>Steps</th><th>Time</th></tr></thead>
+      <tbody>
+        <tr><td><code>get(key)</code></td><td>Lookup in keyMap → remove from freqMap[freq] → increment freq → add to freqMap[freq+1] → update minFreq if needed</td><td>O(1)</td></tr>
+        <tr><td><code>put(key, value)</code></td><td>If exists: update + same as get. If new: evict if full (remove tail of freqMap[minFreq]), insert with freq=1, set minFreq=1</td><td>O(1)</td></tr>
+        <tr><td><code>evict()</code></td><td>Remove tail of freqMap[minFrequency] linked list</td><td>O(1)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="flow-diagram">
+    <div class="flow-node indigo">get(key)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node sky">HashMap Lookup</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node emerald">Hit? Move to Head</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node violet">Return Value</div>
+  </div>
+  <div class="flow-diagram">
+    <div class="flow-node indigo">put(key, val)</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node sky">Key Exists?</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node amber">Full? Evict Tail</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-node emerald">Insert at Head</div>
+  </div>
+</section>
+
+<!-- ==================== HIGH-LEVEL DESIGN ==================== -->
+<section id="high-level-design">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--violet), var(--indigo));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+    </span>
+    High-Level Design
+  </h2>
+
+  <h3 id="lru-architecture"><span class="h3-anchor"></span>LRU Internal Architecture</h3>
+  <p>The LRU cache combines a HashMap with a Doubly Linked List. The HashMap provides O(1) lookup, while the DLL maintains access order with the most recently used entry at the head and the least recently used at the tail.</p>
+
+  <svg viewBox="0 0 800 420" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;margin:20px auto;display:block;">
+    <rect width="800" height="420" rx="12" fill="#0F172A"/>
+    <!-- Title -->
+    <text x="400" y="30" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="14" font-weight="700">LRU Cache — HashMap + Doubly Linked List</text>
+    <!-- HashMap -->
+    <rect x="40" y="55" width="200" height="250" rx="8" fill="none" stroke="#6366f1" stroke-width="2"/>
+    <text x="140" y="78" text-anchor="middle" fill="#6366f1" font-family="Inter,sans-serif" font-size="12" font-weight="700">HashMap&lt;Key, Node&gt;</text>
+    <rect x="55" y="92" width="170" height="30" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="90" y="112" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="11">key: "A"</text>
+    <circle cx="205" cy="107" r="5" fill="#f59e0b"/>
+    <rect x="55" y="130" width="170" height="30" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="90" y="150" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="11">key: "B"</text>
+    <circle cx="205" cy="145" r="5" fill="#10b981"/>
+    <rect x="55" y="168" width="170" height="30" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="90" y="188" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="11">key: "C"</text>
+    <circle cx="205" cy="183" r="5" fill="#0ea5e9"/>
+    <rect x="55" y="206" width="170" height="30" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="90" y="226" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="11">key: "D"</text>
+    <circle cx="205" cy="221" r="5" fill="#f43f5e"/>
+    <!-- Arrows from HashMap to DLL Nodes -->
+    <line x1="210" y1="107" x2="340" y2="123" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="210" y1="145" x2="340" y2="183" stroke="#10b981" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="210" y1="183" x2="340" y2="243" stroke="#0ea5e9" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <line x1="210" y1="221" x2="340" y2="303" stroke="#f43f5e" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <!-- DLL -->
+    <rect x="300" y="55" width="460" height="310" rx="8" fill="none" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="530" y="78" text-anchor="middle" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="12" font-weight="700">Doubly Linked List (MRU → LRU)</text>
+    <!-- HEAD sentinel -->
+    <rect x="320" y="90" width="60" height="40" rx="6" fill="#334155" stroke="#64748b" stroke-width="1.5"/>
+    <text x="350" y="114" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10" font-weight="600">HEAD</text>
+    <!-- Node A (MRU) -->
+    <rect x="330" y="145" width="80" height="50" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+    <text x="370" y="167" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">A: val1</text>
+    <text x="370" y="183" text-anchor="middle" fill="#64748b" font-family="Inter,sans-serif" font-size="9">← MRU</text>
+    <!-- Node B -->
+    <rect x="330" y="205" width="80" height="50" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="2"/>
+    <text x="370" y="227" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">B: val2</text>
+    <!-- Node C -->
+    <rect x="330" y="265" width="80" height="50" rx="6" fill="#1e293b" stroke="#0ea5e9" stroke-width="2"/>
+    <text x="370" y="287" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">C: val3</text>
+    <!-- Node D (LRU) -->
+    <rect x="330" y="325" width="80" height="50" rx="6" fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
+    <text x="370" y="347" text-anchor="middle" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">D: val4</text>
+    <text x="370" y="363" text-anchor="middle" fill="#64748b" font-family="Inter,sans-serif" font-size="9">← LRU (evict)</text>
+    <!-- TAIL sentinel -->
+    <rect x="320" y="385" width="60" height="30" rx="6" fill="#334155" stroke="#64748b" stroke-width="1.5"/>
+    <text x="350" y="404" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10" font-weight="600">TAIL</text>
+    <!-- Arrows between nodes (bidirectional) -->
+    <line x1="350" y1="130" x2="350" y2="145" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="360" y1="145" x2="360" y2="130" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="350" y1="195" x2="350" y2="205" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="360" y1="205" x2="360" y2="195" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="350" y1="255" x2="350" y2="265" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="360" y1="265" x2="360" y2="255" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="350" y1="315" x2="350" y2="325" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="360" y1="325" x2="360" y2="315" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <line x1="350" y1="375" x2="350" y2="385" stroke="#64748b" stroke-width="1.5" marker-end="url(#arrowG)"/>
+    <!-- Operation annotations -->
+    <rect x="460" y="100" width="280" height="55" rx="8" fill="#1e293b" stroke="#6366f1" stroke-width="1"/>
+    <text x="475" y="120" fill="#6366f1" font-family="Inter,sans-serif" font-size="11" font-weight="600">① get(key) / put(existing key)</text>
+    <text x="475" y="140" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Move accessed node to HEAD (most recent)</text>
+    <rect x="460" y="165" width="280" height="55" rx="8" fill="#1e293b" stroke="#10b981" stroke-width="1"/>
+    <text x="475" y="185" fill="#10b981" font-family="Inter,sans-serif" font-size="11" font-weight="600">② put(new key) — cache not full</text>
+    <text x="475" y="205" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Create node, insert after HEAD sentinel</text>
+    <rect x="460" y="230" width="280" height="70" rx="8" fill="#1e293b" stroke="#f43f5e" stroke-width="1"/>
+    <text x="475" y="250" fill="#f43f5e" font-family="Inter,sans-serif" font-size="11" font-weight="600">③ put(new key) — cache full</text>
+    <text x="475" y="270" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Evict TAIL.prev (LRU entry),</text>
+    <text x="475" y="286" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">remove from HashMap, then insert new node</text>
+    <!-- Legend -->
+    <rect x="460" y="320" width="280" height="60" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="475" y="340" fill="#64748b" font-family="Inter,sans-serif" font-size="10" font-weight="600">LEGEND</text>
+    <line x1="475" y1="355" x2="500" y2="355" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="4,3"/>
+    <text x="510" y="359" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">HashMap → DLL pointer</text>
+    <circle cx="482" y="372" r="3" fill="#334155" stroke="#64748b" stroke-width="1"/>
+    <text x="510" y="375" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Sentinel (dummy) node</text>
+    <defs><marker id="arrowG" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#64748b"/></marker></defs>
+  </svg>
+
+  <h3 id="lfu-architecture"><span class="h3-anchor"></span>LFU Internal Architecture</h3>
+  <p>The LFU cache uses a KeyMap for O(1) lookup, a FreqMap that groups nodes by access frequency, and a minFrequency tracker for O(1) eviction. Within each frequency bucket, a DLL maintains recency order for tie-breaking.</p>
+
+  <svg viewBox="0 0 800 450" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:800px;margin:20px auto;display:block;">
+    <rect width="800" height="450" rx="12" fill="#0F172A"/>
+    <text x="400" y="30" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="14" font-weight="700">LFU Cache — KeyMap + FreqMap + minFrequency</text>
+    <!-- KeyMap -->
+    <rect x="30" y="50" width="180" height="180" rx="8" fill="none" stroke="#6366f1" stroke-width="2"/>
+    <text x="120" y="72" text-anchor="middle" fill="#6366f1" font-family="Inter,sans-serif" font-size="11" font-weight="700">KeyMap&lt;Key, Node&gt;</text>
+    <rect x="42" y="84" width="156" height="26" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="120" y="102" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="10">"A" → Node(A,freq=5)</text>
+    <rect x="42" y="116" width="156" height="26" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="120" y="134" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="10">"B" → Node(B,freq=2)</text>
+    <rect x="42" y="148" width="156" height="26" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="120" y="166" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="10">"C" → Node(C,freq=5)</text>
+    <rect x="42" y="180" width="156" height="26" rx="4" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="120" y="198" text-anchor="middle" fill="#94a3b8" font-family="JetBrains Mono,monospace" font-size="10">"D" → Node(D,freq=1)</text>
+    <!-- FreqMap -->
+    <rect x="250" y="50" width="520" height="320" rx="8" fill="none" stroke="#8b5cf6" stroke-width="2"/>
+    <text x="510" y="72" text-anchor="middle" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="11" font-weight="700">FreqMap&lt;Frequency, DLL&gt;</text>
+    <!-- Freq 1 bucket (min) -->
+    <rect x="270" y="88" width="480" height="65" rx="6" fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
+    <text x="290" y="108" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 1</text>
+    <text x="370" y="108" fill="#64748b" font-family="Inter,sans-serif" font-size="9">← minFrequency (evict from here)</text>
+    <rect x="290" y="115" width="40" height="28" rx="4" fill="#334155"/><text x="310" y="133" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="340" y="133" fill="#64748b" font-size="12">⇄</text>
+    <rect x="358" y="115" width="65" height="28" rx="4" fill="#1e293b" stroke="#f43f5e" stroke-width="1.5"/>
+    <text x="390" y="133" text-anchor="middle" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="10">D</text>
+    <text x="437" y="133" fill="#64748b" font-size="12">⇄</text>
+    <rect x="454" y="115" width="65" height="28" rx="4" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="486" y="133" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10">E</text>
+    <text x="533" y="133" fill="#64748b" font-size="12">⇄</text>
+    <rect x="550" y="115" width="40" height="28" rx="4" fill="#334155"/><text x="570" y="133" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">T</text>
+    <!-- Freq 2 bucket -->
+    <rect x="270" y="165" width="480" height="65" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+    <text x="290" y="185" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 2</text>
+    <rect x="290" y="192" width="40" height="28" rx="4" fill="#334155"/><text x="310" y="210" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="340" y="210" fill="#64748b" font-size="12">⇄</text>
+    <rect x="358" y="192" width="65" height="28" rx="4" fill="#1e293b" stroke="#10b981" stroke-width="1.5"/>
+    <text x="390" y="210" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10">B</text>
+    <text x="437" y="210" fill="#64748b" font-size="12">⇄</text>
+    <rect x="454" y="192" width="40" height="28" rx="4" fill="#334155"/><text x="474" y="210" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">T</text>
+    <!-- Freq 5 bucket -->
+    <rect x="270" y="242" width="480" height="65" rx="6" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="290" y="262" fill="#6366f1" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 5</text>
+    <rect x="290" y="269" width="40" height="28" rx="4" fill="#334155"/><text x="310" y="287" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="340" y="287" fill="#64748b" font-size="12">⇄</text>
+    <rect x="358" y="269" width="65" height="28" rx="4" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="390" y="287" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10">A</text>
+    <text x="437" y="287" fill="#64748b" font-size="12">⇄</text>
+    <rect x="454" y="269" width="65" height="28" rx="4" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/>
+    <text x="486" y="287" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="10">C</text>
+    <text x="533" y="287" fill="#64748b" font-size="12">⇄</text>
+    <rect x="550" y="269" width="40" height="28" rx="4" fill="#334155"/><text x="570" y="287" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">T</text>
+    <!-- minFrequency indicator -->
+    <rect x="270" y="320" width="200" height="36" rx="6" fill="#f43f5e" fill-opacity="0.15" stroke="#f43f5e" stroke-width="1.5"/>
+    <text x="370" y="343" text-anchor="middle" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="12" font-weight="700">minFrequency = 1</text>
+    <!-- Legend -->
+    <rect x="30" y="385" width="740" height="50" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="405" fill="#64748b" font-family="Inter,sans-serif" font-size="10" font-weight="600">LEGEND</text>
+    <rect x="50" y="415" width="12" height="12" rx="2" fill="#334155"/><text x="72" y="425" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">H/T = Head/Tail sentinels</text>
+    <rect x="230" y="415" width="12" height="12" rx="2" fill="none" stroke="#f43f5e" stroke-width="1.5"/><text x="252" y="425" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Red border = min frequency bucket</text>
+    <text x="500" y="425" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">⇄ = doubly-linked prev/next pointers</text>
+  </svg>
+
+  <h3 id="lru-operation-walkthrough"><span class="h3-anchor"></span>LRU — Operation Walkthrough</h3>
+  <div class="hld-steps">
+    <div class="hld-step">
+      <div class="hld-step-num">1</div>
+      <div>
+        <div class="hld-step-path">get("B") — Cache Hit</div>
+        <div class="hld-step-title">Recency Update (moveToHead)</div>
+        <div class="hld-step-desc">
+          • HashMap lookup finds Node B in O(1)<br>
+          • <strong>removeNode(B)</strong> — update B's neighbors to skip over B<br>
+          • <strong>addToHead(B)</strong> — re-insert B immediately after HEAD sentinel<br>
+          • B is now the MRU entry<br>
+          • Return B's value
+        </div>
+      </div>
+    </div>
+    <div class="hld-step">
+      <div class="hld-step-num">2</div>
+      <div>
+        <div class="hld-step-path">put("E", val) — Cache Full</div>
+        <div class="hld-step-title">Eviction + Insertion</div>
+        <div class="hld-step-desc">
+          • Cache is at capacity — must evict before inserting<br>
+          • <strong>Evict:</strong> Remove <code>tail.prev</code> from the DLL (the LRU entry)<br>
+          • Remove evicted key from HashMap (this is why key is stored in Node)<br>
+          • <strong>Insert:</strong> Create Node E, add after HEAD sentinel<br>
+          • Add E to HashMap<br>
+          • E is now MRU
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3 id="lfu-operation-walkthrough"><span class="h3-anchor"></span>LFU — Operation Walkthrough</h3>
+  <div class="hld-steps">
+    <div class="hld-step">
+      <div class="hld-step-num">1</div>
+      <div>
+        <div class="hld-step-path">get("B") — B has freq=2</div>
+        <div class="hld-step-title">Frequency Promotion</div>
+        <div class="hld-step-desc">
+          • KeyMap lookup finds Node B in O(1)<br>
+          • <strong>Remove B</strong> from freqMap[2]'s DLL<br>
+          • <strong>Check minFrequency:</strong> Is freqMap[2] now empty AND minFrequency == 2?<br>
+          &nbsp;&nbsp;&nbsp;→ Yes: increment minFrequency to 3<br>
+          &nbsp;&nbsp;&nbsp;→ No: minFrequency stays unchanged<br>
+          • <strong>Increment</strong> B.frequency from 2 → 3<br>
+          • <strong>Insert B at HEAD</strong> of freqMap[3]'s DLL (creates bucket if needed)<br>
+          • Return B's value
+        </div>
+      </div>
+    </div>
+    <div class="hld-step">
+      <div class="hld-step-num">2</div>
+      <div>
+        <div class="hld-step-path">put("F", val) — Cache Full</div>
+        <div class="hld-step-title">Min-Frequency Eviction + Reset</div>
+        <div class="hld-step-desc">
+          • Cache is at capacity — must evict before inserting<br>
+          • <strong>Find victim:</strong> Go to freqMap[minFrequency]'s DLL<br>
+          • <strong>Evict:</strong> Remove <code>tail.prev</code> from that DLL (least frequent; among ties, least recent)<br>
+          • Remove evicted key from KeyMap<br>
+          • <strong>Insert:</strong> Create Node F with frequency = 1<br>
+          • Add F to freqMap[1]'s DLL at HEAD<br>
+          • <strong>Set minFrequency = 1</strong> — always, because new node has freq=1<br>
+          • Add F to KeyMap
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: LRU IMPLEMENTATION ==================== -->
+<section id="deep-dive-lru">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--indigo), var(--sky));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+    </span>
+    Deep Dive — LRU Implementation
+  </h2>
+
+  <h3 id="lru-java-impl"><span class="h3-anchor"></span>Complete Java Implementation</h3>
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="kw">import</span> java.util.HashMap;
+<span class="kw">import</span> java.util.Map;
+
+<span class="kw">public class</span> <span class="ty">LRUCache</span> {
+
+    <span class="cm">// Doubly linked list node</span>
+    <span class="kw">static class</span> <span class="ty">Node</span> {
+        <span class="kw">int</span> key;
+        <span class="kw">int</span> value;
+        <span class="ty">Node</span> prev;
+        <span class="ty">Node</span> next;
+
+        <span class="fn">Node</span>(<span class="kw">int</span> key, <span class="kw">int</span> value) {
+            <span class="kw">this</span>.key = key;
+            <span class="kw">this</span>.value = value;
+        }
+    }
+
+    <span class="kw">private final int</span> capacity;
+    <span class="kw">private final</span> <span class="ty">Map</span>&lt;<span class="ty">Integer</span>, <span class="ty">Node</span>&gt; map;
+
+    <span class="cm">// Sentinel nodes — eliminates null checks at boundaries</span>
+    <span class="kw">private final</span> <span class="ty">Node</span> head;
+    <span class="kw">private final</span> <span class="ty">Node</span> tail;
+
+    <span class="kw">public</span> <span class="fn">LRUCache</span>(<span class="kw">int</span> capacity) {
+        <span class="kw">this</span>.capacity = capacity;
+        <span class="kw">this</span>.map = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+
+        <span class="cm">// head and tail are dummy sentinels, never removed</span>
+        <span class="kw">this</span>.head = <span class="kw">new</span> <span class="fn">Node</span>(-<span class="nu">1</span>, -<span class="nu">1</span>);
+        <span class="kw">this</span>.tail = <span class="kw">new</span> <span class="fn">Node</span>(-<span class="nu">1</span>, -<span class="nu">1</span>);
+        head.next = tail;
+        tail.prev = head;
+    }
+
+    <span class="kw">public int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+        <span class="ty">Node</span> node = map.<span class="fn">get</span>(key);
+        <span class="kw">if</span> (node == <span class="kw">null</span>) {
+            <span class="kw">return</span> -<span class="nu">1</span>; <span class="cm">// cache miss</span>
+        }
+        <span class="cm">// Move to head (mark as most recently used)</span>
+        <span class="fn">moveToHead</span>(node);
+        <span class="kw">return</span> node.value;
+    }
+
+    <span class="kw">public void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">int</span> value) {
+        <span class="ty">Node</span> node = map.<span class="fn">get</span>(key);
+
+        <span class="kw">if</span> (node != <span class="kw">null</span>) {
+            <span class="cm">// Key exists — update value and move to head</span>
+            node.value = value;
+            <span class="fn">moveToHead</span>(node);
+        } <span class="kw">else</span> {
+            <span class="cm">// New key — check capacity</span>
+            <span class="kw">if</span> (map.<span class="fn">size</span>() >= capacity) {
+                <span class="cm">// Evict LRU entry (tail.prev is the least recently used)</span>
+                <span class="ty">Node</span> lru = tail.prev;
+                <span class="fn">removeNode</span>(lru);
+                map.<span class="fn">remove</span>(lru.key);
+            }
+            <span class="cm">// Insert new node at head</span>
+            <span class="ty">Node</span> newNode = <span class="kw">new</span> <span class="fn">Node</span>(key, value);
+            <span class="fn">addToHead</span>(newNode);
+            map.<span class="fn">put</span>(key, newNode);
+        }
+    }
+
+    <span class="cm">// --- Internal linked list operations ---</span>
+
+    <span class="kw">private void</span> <span class="fn">addToHead</span>(<span class="ty">Node</span> node) {
+        node.prev = head;              <span class="cm">// new node's prev → HEAD sentinel</span>
+        node.next = head.next;          <span class="cm">// new node's next → current first node (NOT tail!)</span>
+        head.next.prev = node;          <span class="cm">// old first node's prev → new node</span>
+        head.next = node;               <span class="cm">// HEAD sentinel's next → new node</span>
+    }
+
+    <span class="kw">private void</span> <span class="fn">removeNode</span>(<span class="ty">Node</span> node) {
+        node.prev.next = node.next;
+        node.next.prev = node.prev;
+    }
+
+    <span class="kw">private void</span> <span class="fn">moveToHead</span>(<span class="ty">Node</span> node) {
+        <span class="fn">removeNode</span>(node);
+        <span class="fn">addToHead</span>(node);
+    }
+}</pre>
+  </div>
+
+  <h3 id="dll-operations-visual"><span class="h3-anchor"></span>DLL Operations — Visual Walkthrough</h3>
+  <p>The core operation in LRU is <code>moveToHead()</code> = <code>removeNode()</code> + <code>addToHead()</code>. This SVG shows exactly what happens to pointers when <code>get("B")</code> is called.</p>
+
+  <svg viewBox="0 0 780 520" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:780px;margin:20px auto;display:block;">
+    <rect width="780" height="520" rx="12" fill="#0F172A"/>
+    <text x="390" y="28" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="13" font-weight="700">moveToHead(B): removeNode(B) → addToHead(B)</text>
+
+    <!-- BEFORE STATE -->
+    <text x="30" y="62" fill="#64748b" font-family="Inter,sans-serif" font-size="11" font-weight="600">BEFORE — get("B") called</text>
+    <rect x="30" y="72" width="60" height="36" rx="6" fill="#334155"/><text x="60" y="95" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">HEAD</text>
+    <rect x="130" y="72" width="70" height="36" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/><text x="165" y="95" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">A</text>
+    <rect x="240" y="72" width="70" height="36" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="2.5"/><text x="275" y="95" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">B</text>
+    <text x="275" y="68" text-anchor="middle" fill="#10b981" font-family="Inter,sans-serif" font-size="9">← target</text>
+    <rect x="350" y="72" width="70" height="36" rx="6" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/><text x="385" y="95" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">C</text>
+    <rect x="460" y="72" width="60" height="36" rx="6" fill="#334155"/><text x="490" y="95" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">TAIL</text>
+    <!-- arrows -->
+    <line x1="90" y1="86" x2="130" y2="86" stroke="#64748b" stroke-width="1.2"/><line x1="130" y1="94" x2="90" y2="94" stroke="#64748b" stroke-width="1.2"/>
+    <line x1="200" y1="86" x2="240" y2="86" stroke="#64748b" stroke-width="1.2"/><line x1="240" y1="94" x2="200" y2="94" stroke="#64748b" stroke-width="1.2"/>
+    <line x1="310" y1="86" x2="350" y2="86" stroke="#64748b" stroke-width="1.2"/><line x1="350" y1="94" x2="310" y2="94" stroke="#64748b" stroke-width="1.2"/>
+    <line x1="420" y1="86" x2="460" y2="86" stroke="#64748b" stroke-width="1.2"/><line x1="460" y1="94" x2="420" y2="94" stroke="#64748b" stroke-width="1.2"/>
+
+    <!-- STEP 1: removeNode(B) -->
+    <text x="30" y="148" fill="#f43f5e" font-family="Inter,sans-serif" font-size="11" font-weight="600">STEP 1 — removeNode(B)</text>
+    <rect x="30" y="158" width="60" height="36" rx="6" fill="#334155"/><text x="60" y="181" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">HEAD</text>
+    <rect x="130" y="158" width="70" height="36" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/><text x="165" y="181" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">A</text>
+    <rect x="240" y="175" width="70" height="36" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/><text x="275" y="198" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11" opacity="0.4">B</text>
+    <text x="275" y="225" text-anchor="middle" fill="#f43f5e" font-family="Inter,sans-serif" font-size="9">disconnected</text>
+    <rect x="350" y="158" width="70" height="36" rx="6" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/><text x="385" y="181" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">C</text>
+    <rect x="460" y="158" width="60" height="36" rx="6" fill="#334155"/><text x="490" y="181" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">TAIL</text>
+    <!-- A links directly to C now -->
+    <line x1="90" y1="172" x2="130" y2="172" stroke="#64748b" stroke-width="1.2"/><line x1="130" y1="180" x2="90" y2="180" stroke="#64748b" stroke-width="1.2"/>
+    <line x1="200" y1="172" x2="350" y2="172" stroke="#f43f5e" stroke-width="2"/><line x1="350" y1="180" x2="200" y2="180" stroke="#f43f5e" stroke-width="2"/>
+    <line x1="420" y1="172" x2="460" y2="172" stroke="#64748b" stroke-width="1.2"/><line x1="460" y1="180" x2="420" y2="180" stroke="#64748b" stroke-width="1.2"/>
+    <!-- code annotations -->
+    <rect x="540" y="148" width="220" height="65" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="555" y="168" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="10">B.prev.next = B.next</text>
+    <text x="555" y="183" fill="#64748b" font-family="Inter,sans-serif" font-size="9">→ A.next now points to C</text>
+    <text x="555" y="200" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="10">B.next.prev = B.prev</text>
+    <text x="555" y="215" fill="#64748b" font-family="Inter,sans-serif" font-size="9">→ C.prev now points to A</text>
+
+    <!-- STEP 2: addToHead(B) -->
+    <text x="30" y="262" fill="#10b981" font-family="Inter,sans-serif" font-size="11" font-weight="600">STEP 2 — addToHead(B)</text>
+    <rect x="30" y="272" width="60" height="36" rx="6" fill="#334155"/><text x="60" y="295" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">HEAD</text>
+    <rect x="130" y="272" width="70" height="36" rx="6" fill="#1e293b" stroke="#10b981" stroke-width="2.5"/><text x="165" y="295" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">B</text>
+    <text x="165" y="268" text-anchor="middle" fill="#10b981" font-family="Inter,sans-serif" font-size="9">← now MRU</text>
+    <rect x="240" y="272" width="70" height="36" rx="6" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/><text x="275" y="295" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">A</text>
+    <rect x="350" y="272" width="70" height="36" rx="6" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/><text x="385" y="295" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="11" font-weight="600">C</text>
+    <rect x="460" y="272" width="60" height="36" rx="6" fill="#334155"/><text x="490" y="295" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="10">TAIL</text>
+    <!-- arrows -->
+    <line x1="90" y1="286" x2="130" y2="286" stroke="#10b981" stroke-width="2"/><line x1="130" y1="294" x2="90" y2="294" stroke="#10b981" stroke-width="2"/>
+    <line x1="200" y1="286" x2="240" y2="286" stroke="#10b981" stroke-width="2"/><line x1="240" y1="294" x2="200" y2="294" stroke="#10b981" stroke-width="2"/>
+    <line x1="310" y1="286" x2="350" y2="286" stroke="#64748b" stroke-width="1.2"/><line x1="350" y1="294" x2="310" y2="294" stroke="#64748b" stroke-width="1.2"/>
+    <line x1="420" y1="286" x2="460" y2="286" stroke="#64748b" stroke-width="1.2"/><line x1="460" y1="294" x2="420" y2="294" stroke="#64748b" stroke-width="1.2"/>
+    <!-- code annotations -->
+    <rect x="540" y="262" width="220" height="95" rx="6" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="555" y="282" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10">B.prev = HEAD</text>
+    <text x="555" y="297" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10">B.next = HEAD.next</text>
+    <text x="555" y="312" fill="#64748b" font-family="Inter,sans-serif" font-size="9">→ B.next = A (the old first node)</text>
+    <text x="555" y="329" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10">HEAD.next.prev = B</text>
+    <text x="555" y="344" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10">HEAD.next = B</text>
+
+    <!-- RESULT -->
+    <text x="30" y="345" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="11" font-weight="600">RESULT</text>
+    <rect x="30" y="355" width="490" height="36" rx="6" fill="#8b5cf6" fill-opacity="0.1" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="275" y="378" text-anchor="middle" fill="#e2e8f0" font-family="JetBrains Mono,monospace" font-size="12">HEAD ⟷ <tspan fill="#10b981" font-weight="700">B</tspan> ⟷ A ⟷ C ⟷ TAIL</text>
+    <text x="275" y="408" text-anchor="middle" fill="#64748b" font-family="Inter,sans-serif" font-size="10">B is now Most Recently Used. Order changed with only 6 pointer assignments — O(1).</text>
+
+    <!-- Legend -->
+    <rect x="30" y="425" width="720" height="80" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="445" fill="#64748b" font-family="Inter,sans-serif" font-size="10" font-weight="600">LEGEND</text>
+    <line x1="50" y1="460" x2="80" y2="460" stroke="#f43f5e" stroke-width="2"/><text x="90" y="464" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Pointer reassigned in removeNode()</text>
+    <line x1="50" y1="480" x2="80" y2="480" stroke="#10b981" stroke-width="2"/><text x="90" y="484" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Pointer reassigned in addToHead()</text>
+    <rect x="370" y="454" width="40" height="16" rx="3" fill="none" stroke="#10b981" stroke-width="2.5"/><text x="420" y="466" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Target node (being moved)</text>
+    <rect x="370" y="476" width="40" height="16" rx="3" fill="none" stroke="#64748b" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.4"/><text x="420" y="488" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Disconnected node</text>
+  </svg>
+
+  <h3 id="sentinel-explained"><span class="h3-anchor"></span>Why Sentinel Nodes Matter</h3>
+
+  <div class="info-box amber">
+    <div class="info-box-title">⚠️ Common Confusion: head.next ≠ tail</div>
+    <p>In <code>addToHead()</code>, <code>head.next</code> refers to the <strong>current first real data node</strong> — NOT the TAIL sentinel. The TAIL sentinel is the last node in the list. <code>head.next == tail</code> is only true when the list is empty. When there are N real nodes between the sentinels, <code>head.next</code> is Node 1 (MRU) and <code>tail.prev</code> is Node N (LRU). Replacing <code>head.next</code> with <code>tail</code> would break insertion by skipping all existing nodes.</p>
+  </div>
+  <div class="comparison-grid">
+    <div class="comparison-card bad">
+      <div class="comparison-card-title">❌ Without Sentinels — Error-Prone</div>
+      <p>Every <code>removeNode()</code> and <code>addToHead()</code> needs null checks for both <code>prev</code> and <code>next</code>. Four branches per operation. Easy to miss an edge case, especially when the list has 0 or 1 real nodes.</p>
+    </div>
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ With Sentinels — Clean & Bug-Free</div>
+      <p>Real data nodes always have non-null <code>prev</code> and <code>next</code> (pointing to sentinels at minimum). Zero branches in <code>removeNode()</code> — just 2 pointer assignments. This is why experienced engineers always use sentinels.</p>
+    </div>
+  </div>
+
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java — Without Sentinels (DON'T DO THIS)</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="cm">// WITHOUT sentinels — 4 branches, error-prone</span>
+<span class="kw">private void</span> <span class="fn">removeNode</span>(<span class="ty">Node</span> node) {
+    <span class="kw">if</span> (node.prev != <span class="kw">null</span>) {
+        node.prev.next = node.next;
+    } <span class="kw">else</span> {
+        head = node.next; <span class="cm">// node was head</span>
+    }
+    <span class="kw">if</span> (node.next != <span class="kw">null</span>) {
+        node.next.prev = node.prev;
+    } <span class="kw">else</span> {
+        tail = node.prev; <span class="cm">// node was tail</span>
+    }
+}</pre>
+  </div>
+
+  <h3 id="lru-linkedhashmap"><span class="h3-anchor"></span>Java's LinkedHashMap Shortcut</h3>
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java — LinkedHashMap LRU</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="kw">import</span> java.util.LinkedHashMap;
+<span class="kw">import</span> java.util.Map;
+
+<span class="kw">public class</span> <span class="ty">LRUCacheLinkedHashMap</span> <span class="kw">extends</span> <span class="ty">LinkedHashMap</span>&lt;<span class="ty">Integer</span>, <span class="ty">Integer</span>&gt; {
+    <span class="kw">private final int</span> capacity;
+
+    <span class="kw">public</span> <span class="fn">LRUCacheLinkedHashMap</span>(<span class="kw">int</span> capacity) {
+        <span class="cm">// accessOrder=true makes it ordered by access time, not insertion</span>
+        <span class="kw">super</span>(capacity, <span class="nu">0.75f</span>, <span class="kw">true</span>);
+        <span class="kw">this</span>.capacity = capacity;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">protected boolean</span> <span class="fn">removeEldestEntry</span>(<span class="ty">Map.Entry</span>&lt;<span class="ty">Integer</span>, <span class="ty">Integer</span>&gt; eldest) {
+        <span class="kw">return</span> <span class="fn">size</span>() > capacity;
+    }
+}</pre>
+  </div>
+
+  <div class="info-box sky">
+    <div class="info-box-title">🔍 When to Use Which</div>
+    <p><strong>Interview</strong>: Always implement from scratch with HashMap + DLL. This is what interviewers are testing — understanding of the underlying mechanics.</p>
+    <p><strong>Production</strong>: <code>LinkedHashMap</code> is fine for simple cases. For production-grade caching, use Caffeine (Java) or Guava Cache, which handle concurrency, TTL, statistics, and eviction callbacks.</p>
+  </div>
+
+  <h3 id="lru-strengths-weaknesses"><span class="h3-anchor"></span>LRU — Strengths & Weaknesses</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ Strengths</div>
+      <ul>
+        <li><strong>Simple mental model</strong> — "most recently used stays" is intuitive</li>
+        <li><strong>O(1) everything</strong> — get, put, evict all constant time</li>
+        <li><strong>Adapts to workload shifts</strong> — when access patterns change, cache adjusts within one full cycle</li>
+        <li><strong>Low overhead</strong> — just 2 extra pointers per entry (~16 bytes)</li>
+        <li><strong>Temporal locality</strong> — exploits the principle that recently accessed data is likely accessed again</li>
+      </ul>
+    </div>
+    <div class="comparison-card bad">
+      <div class="comparison-card-title">❌ Weaknesses</div>
+      <ul>
+        <li><strong>Scan pollution</strong> — a sequential scan of N items (N > cache size) flushes the entire cache, evicting hot entries</li>
+        <li><strong>No frequency signal</strong> — an item accessed 1,000× and one accessed 1× are treated the same. Most recent wins regardless of history</li>
+        <li><strong>Pathological workload</strong> — if working set is slightly larger than cache, LRU can achieve 0% hit rate, cycling through entries just before reuse</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Adapts to Workload Shifts — Explained</div>
+    <p>Imagine your cache (capacity=5) holds hot items A–E. A marketing campaign launches and users suddenly want X, Y, Z, W, V instead.</p>
+    <p>With LRU, the moment X is accessed it goes to the head. Then Y, then Z. Within just <strong>5 new accesses</strong> (one full cache cycle), A–E are entirely replaced by X–V. LRU naturally "forgets" the old pattern because recency is the only signal — no historical baggage.</p>
+    <p>With LFU, A–E might have accumulated frequencies of 500+. New entries X–Z arrive at freq=1 and are immediately evicted. It could take <strong>thousands of accesses</strong> before the new set overtakes the old. "One full cycle" = enough unique new accesses to fill the cache once.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Scan Pollution — Explained</div>
+    <p>A "scan" is when something reads through a large dataset sequentially, touching each item exactly once. Real examples: a database <code>SELECT * FROM users</code>, a nightly analytics job reading every log file, a backup process reading all objects.</p>
+    <p>Say your cache (capacity=5) has hot items A, B, C. A batch job scans D through K — each accessed once:</p>
+    <div class="math-block">
+Before scan:  [C, B, A, _, _]     ← hot items safe
+Scan D:       [D, C, B, A, _]
+Scan E:       [E, D, C, B, A]     ← cache full
+Scan F:       [F, E, D, C, B]     ← A evicted!
+Scan G:       [G, F, E, D, C]     ← B evicted!
+Scan H:       [H, G, F, E, D]     ← C evicted!
+After scan:   [K, J, I, H, G]     ← ALL hot items gone
+    </div>
+    <p>The scan items will <strong>never be accessed again</strong>, but they flushed out entries that <em>would</em> have been accessed again. One bad scan destroys your entire useful cache. This is called "pollution" because useless one-time entries contaminate the cache.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Pathological Workload — Explained</div>
+    <p>A surprisingly common worst-case. Cache capacity = 4, working set = 5 items (A–E), access pattern cycles: A → B → C → D → E → A → B → ...</p>
+    <div class="math-block">
+Access A: [A]             MISS
+Access B: [B, A]          MISS
+Access C: [C, B, A]       MISS
+Access D: [D, C, B, A]    MISS  (cache full)
+Access E: [E, D, C, B]    MISS  (A evicted)
+Access A: [A, E, D, C]    MISS  (A was JUST evicted one step ago!)
+Access B: [B, A, E, D]    MISS  (same pattern repeats)
+    </div>
+    <p><strong>Every single access is a miss. 0% hit rate.</strong> The working set (5) is barely larger than the cache (4), so every time you return to an item, it was evicted exactly one step ago. You're always one step too late.</p>
+    <p>The cliff is dramatic: increase cache to 5 → <strong>100% hit rate</strong>. Decrease by 1 → <strong>0% hit rate</strong>. This discontinuity is the pathological behavior.</p>
+  </div>
+
+</section>
+
+<!-- ==================== DEEP DIVE: LFU IMPLEMENTATION ==================== -->
+<section id="deep-dive-lfu">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--amber), #d97706);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+    </span>
+    Deep Dive — LFU Implementation
+  </h2>
+
+  <h3 id="lfu-java-impl"><span class="h3-anchor"></span>Complete Java Implementation</h3>
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="kw">import</span> java.util.HashMap;
+<span class="kw">import</span> java.util.Map;
+
+<span class="kw">public class</span> <span class="ty">LFUCache</span> {
+
+    <span class="kw">static class</span> <span class="ty">Node</span> {
+        <span class="kw">int</span> key, value, frequency;
+        <span class="ty">Node</span> prev, next;
+        <span class="fn">Node</span>(<span class="kw">int</span> k, <span class="kw">int</span> v) { key = k; value = v; frequency = <span class="nu">1</span>; }
+    }
+
+    <span class="kw">static class</span> <span class="ty">DoublyLinkedList</span> {
+        <span class="ty">Node</span> head, tail;
+        <span class="kw">int</span> size;
+
+        <span class="fn">DoublyLinkedList</span>() {
+            head = <span class="kw">new</span> <span class="fn">Node</span>(-<span class="nu">1</span>, -<span class="nu">1</span>);
+            tail = <span class="kw">new</span> <span class="fn">Node</span>(-<span class="nu">1</span>, -<span class="nu">1</span>);
+            head.next = tail; tail.prev = head;
+            size = <span class="nu">0</span>;
+        }
+
+        <span class="kw">void</span> <span class="fn">addToHead</span>(<span class="ty">Node</span> n) {
+            n.prev = head; n.next = head.next;
+            head.next.prev = n; head.next = n;
+            size++;
+        }
+
+        <span class="kw">void</span> <span class="fn">removeNode</span>(<span class="ty">Node</span> n) {
+            n.prev.next = n.next; n.next.prev = n.prev;
+            size--;
+        }
+
+        <span class="ty">Node</span> <span class="fn">removeTail</span>() {
+            <span class="kw">if</span> (size == <span class="nu">0</span>) <span class="kw">return null</span>;
+            <span class="ty">Node</span> lfu = tail.prev;
+            <span class="fn">removeNode</span>(lfu);
+            <span class="kw">return</span> lfu;
+        }
+
+        <span class="kw">boolean</span> <span class="fn">isEmpty</span>() { <span class="kw">return</span> size == <span class="nu">0</span>; }
+    }
+
+    <span class="kw">private final int</span> capacity;
+    <span class="kw">private int</span> minFrequency;
+    <span class="kw">private final</span> <span class="ty">Map</span>&lt;<span class="ty">Integer</span>, <span class="ty">Node</span>&gt; keyMap;
+    <span class="kw">private final</span> <span class="ty">Map</span>&lt;<span class="ty">Integer</span>, <span class="ty">DoublyLinkedList</span>&gt; freqMap;
+
+    <span class="kw">public</span> <span class="fn">LFUCache</span>(<span class="kw">int</span> capacity) {
+        <span class="kw">this</span>.capacity = capacity;
+        <span class="kw">this</span>.minFrequency = <span class="nu">0</span>;
+        <span class="kw">this</span>.keyMap = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+        <span class="kw">this</span>.freqMap = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+    }
+
+    <span class="kw">public int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+        <span class="ty">Node</span> node = keyMap.<span class="fn">get</span>(key);
+        <span class="kw">if</span> (node == <span class="kw">null</span>) <span class="kw">return</span> -<span class="nu">1</span>;
+        <span class="fn">updateFrequency</span>(node);
+        <span class="kw">return</span> node.value;
+    }
+
+    <span class="kw">public void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">int</span> value) {
+        <span class="kw">if</span> (capacity == <span class="nu">0</span>) <span class="kw">return</span>;
+
+        <span class="ty">Node</span> node = keyMap.<span class="fn">get</span>(key);
+        <span class="kw">if</span> (node != <span class="kw">null</span>) {
+            node.value = value;
+            <span class="fn">updateFrequency</span>(node);
+        } <span class="kw">else</span> {
+            <span class="kw">if</span> (keyMap.<span class="fn">size</span>() >= capacity) {
+                <span class="cm">// Evict least frequent (and among those, least recent)</span>
+                <span class="ty">DoublyLinkedList</span> minList = freqMap.<span class="fn">get</span>(minFrequency);
+                <span class="ty">Node</span> evicted = minList.<span class="fn">removeTail</span>();
+                keyMap.<span class="fn">remove</span>(evicted.key);
+            }
+            <span class="ty">Node</span> newNode = <span class="kw">new</span> <span class="fn">Node</span>(key, value);
+            keyMap.<span class="fn">put</span>(key, newNode);
+            freqMap.<span class="fn">computeIfAbsent</span>(<span class="nu">1</span>, k -> <span class="kw">new</span> <span class="ty">DoublyLinkedList</span>()).<span class="fn">addToHead</span>(newNode);
+            minFrequency = <span class="nu">1</span>; <span class="cm">// new node always has freq=1</span>
+        }
+    }
+
+    <span class="kw">private void</span> <span class="fn">updateFrequency</span>(<span class="ty">Node</span> node) {
+        <span class="kw">int</span> oldFreq = node.frequency;
+        <span class="ty">DoublyLinkedList</span> oldList = freqMap.<span class="fn">get</span>(oldFreq);
+        oldList.<span class="fn">removeNode</span>(node);
+
+        <span class="cm">// If we emptied the min frequency bucket, increment minFrequency</span>
+        <span class="kw">if</span> (oldFreq == minFrequency && oldList.<span class="fn">isEmpty</span>()) {
+            minFrequency++;
+        }
+
+        <span class="cm">// Move to next frequency bucket</span>
+        node.frequency++;
+        freqMap.<span class="fn">computeIfAbsent</span>(node.frequency, k -> <span class="kw">new</span> <span class="ty">DoublyLinkedList</span>())
+               .<span class="fn">addToHead</span>(node);
+    }
+}</pre>
+  </div>
+
+  <h3 id="min-frequency-correctness"><span class="h3-anchor"></span>Why minFrequency Is Always Correct</h3>
+
+  <div class="info-box violet">
+    <div class="info-box-title">🧠 The Key Insight</div>
+    <p>The <code>minFrequency</code> variable seems fragile — how do we know it's correct without scanning all frequencies? The proof relies on two observations:</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">minFrequency Correctness Proof</div>
+    <p><strong>Case 1 — New entry inserted:</strong> Always has frequency=1, so <code>minFrequency = 1</code>. Guaranteed correct because no entry can have frequency &lt; 1.</p>
+    <p><strong>Case 2 — Entry promoted from minFrequency bucket:</strong> If the <code>freqMap[minFrequency]</code> bucket becomes empty after promotion, <code>minFrequency++</code>. This works because the promoted node went to <code>minFrequency + 1</code>, which is now the new minimum.</p>
+    <p><strong>Why it never needs to decrease</strong> (except on new insert): Any node at frequency F was previously at frequency F-1. So if F-1's bucket is empty and F is the smallest non-empty bucket, <code>minFrequency = F</code> is correct.</p>
+    <p><strong>Why it never skips values:</strong> Frequencies increment by exactly 1 on each access. There are no gaps. If minFrequency was 3 and we empty bucket 3, the promoted node is in bucket 4 — so <code>minFrequency = 4</code> is the true minimum.</p>
+  </div>
+
+  <h3 id="lfu-promotion-visual"><span class="h3-anchor"></span>Frequency Promotion — Visual Walkthrough</h3>
+  <p>When <code>get("B")</code> is called and B has freq=2, it must move from the freq=2 bucket to freq=3. If B was the last entry in the minFrequency bucket, minFrequency increments.</p>
+
+  <svg viewBox="0 0 780 440" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:780px;margin:20px auto;display:block;">
+    <rect width="780" height="440" rx="12" fill="#0F172A"/>
+    <text x="390" y="28" text-anchor="middle" fill="#e2e8f0" font-family="Inter,sans-serif" font-size="13" font-weight="700">LFU Frequency Promotion: get("B") where B.freq = 2</text>
+
+    <!-- BEFORE -->
+    <text x="30" y="58" fill="#64748b" font-family="Inter,sans-serif" font-size="11" font-weight="600">BEFORE</text>
+    <!-- freq=2 bucket -->
+    <rect x="30" y="70" width="340" height="58" rx="6" fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
+    <text x="45" y="90" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 2</text>
+    <text x="130" y="90" fill="#64748b" font-family="Inter,sans-serif" font-size="9">← minFrequency</text>
+    <rect x="45" y="98" width="30" height="22" rx="3" fill="#334155"/><text x="60" y="113" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="82" y="113" fill="#64748b" font-size="10">⇄</text>
+    <rect x="95" y="98" width="55" height="22" rx="3" fill="#1e293b" stroke="#10b981" stroke-width="2"/><text x="122" y="113" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10" font-weight="600">B</text>
+    <text x="160" y="113" fill="#64748b" font-size="10">⇄</text>
+    <rect x="172" y="98" width="30" height="22" rx="3" fill="#334155"/><text x="187" y="113" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">T</text>
+    <!-- freq=3 bucket -->
+    <rect x="30" y="138" width="340" height="58" rx="6" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="45" y="158" fill="#6366f1" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 3</text>
+    <rect x="45" y="166" width="30" height="22" rx="3" fill="#334155"/><text x="60" y="181" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="82" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="95" y="166" width="55" height="22" rx="3" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/><text x="122" y="181" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10">A</text>
+    <text x="160" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="172" y="166" width="55" height="22" rx="3" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/><text x="199" y="181" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="10">C</text>
+    <text x="237" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="249" y="166" width="30" height="22" rx="3" fill="#334155"/><text x="264" y="181" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">T</text>
+
+    <!-- ARROW -->
+    <text x="405" y="132" text-anchor="middle" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="24">→</text>
+    <text x="405" y="152" text-anchor="middle" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="10" font-weight="600">get("B")</text>
+
+    <!-- AFTER -->
+    <text x="450" y="58" fill="#64748b" font-family="Inter,sans-serif" font-size="11" font-weight="600">AFTER</text>
+    <!-- freq=2 bucket — now EMPTY -->
+    <rect x="450" y="70" width="310" height="58" rx="6" fill="#1e293b" stroke="#64748b" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/>
+    <text x="465" y="90" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="11" opacity="0.5">freq = 2</text>
+    <text x="545" y="90" fill="#f43f5e" font-family="Inter,sans-serif" font-size="9">← EMPTY! minFreq++</text>
+    <rect x="465" y="98" width="30" height="22" rx="3" fill="#334155" opacity="0.4"/><text x="480" y="113" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9" opacity="0.4">H</text>
+    <text x="502" y="113" fill="#64748b" font-size="10" opacity="0.4">⇄</text>
+    <rect x="515" y="98" width="30" height="22" rx="3" fill="#334155" opacity="0.4"/><text x="530" y="113" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9" opacity="0.4">T</text>
+    <!-- freq=3 bucket — B now at head -->
+    <rect x="450" y="138" width="310" height="58" rx="6" fill="#1e293b" stroke="#f43f5e" stroke-width="2"/>
+    <text x="465" y="158" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11" font-weight="700">freq = 3</text>
+    <text x="540" y="158" fill="#64748b" font-family="Inter,sans-serif" font-size="9">← new minFrequency</text>
+    <rect x="465" y="166" width="30" height="22" rx="3" fill="#334155"/><text x="480" y="181" text-anchor="middle" fill="#64748b" font-family="JetBrains Mono,monospace" font-size="9">H</text>
+    <text x="502" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="515" y="166" width="55" height="22" rx="3" fill="#1e293b" stroke="#10b981" stroke-width="2"/><text x="542" y="181" text-anchor="middle" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="10" font-weight="600">B</text>
+    <text x="578" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="591" y="166" width="55" height="22" rx="3" fill="#1e293b" stroke="#f59e0b" stroke-width="1.5"/><text x="618" y="181" text-anchor="middle" fill="#f59e0b" font-family="JetBrains Mono,monospace" font-size="10">A</text>
+    <text x="654" y="181" fill="#64748b" font-size="10">⇄</text>
+    <rect x="665" y="166" width="55" height="22" rx="3" fill="#1e293b" stroke="#0ea5e9" stroke-width="1.5"/><text x="692" y="181" text-anchor="middle" fill="#0ea5e9" font-family="JetBrains Mono,monospace" font-size="10">C</text>
+
+    <!-- Step annotations -->
+    <rect x="30" y="220" width="720" height="150" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="245" fill="#8b5cf6" font-family="Inter,sans-serif" font-size="12" font-weight="700">Step-by-Step</text>
+    <text x="50" y="270" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11">❶</text><text x="70" y="270" fill="#94a3b8" font-family="Inter,sans-serif" font-size="11">Remove B from freqMap[2]'s DLL</text>
+    <text x="50" y="295" fill="#f43f5e" font-family="JetBrains Mono,monospace" font-size="11">❷</text><text x="70" y="295" fill="#94a3b8" font-family="Inter,sans-serif" font-size="11">freqMap[2] is now empty AND minFrequency == 2, so <tspan fill="#f43f5e" font-weight="600">minFrequency = 3</tspan></text>
+    <text x="50" y="320" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11">❸</text><text x="70" y="320" fill="#94a3b8" font-family="Inter,sans-serif" font-size="11">Increment B.frequency from 2 → 3</text>
+    <text x="50" y="345" fill="#10b981" font-family="JetBrains Mono,monospace" font-size="11">❹</text><text x="70" y="345" fill="#94a3b8" font-family="Inter,sans-serif" font-size="11">Insert B at HEAD of freqMap[3]'s DLL (B is most recent in this freq bucket)</text>
+
+    <!-- Legend -->
+    <rect x="30" y="385" width="720" height="42" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+    <text x="50" y="410" fill="#64748b" font-family="Inter,sans-serif" font-size="10" font-weight="600">LEGEND</text>
+    <rect x="120" y="400" width="16" height="14" rx="2" fill="none" stroke="#f43f5e" stroke-width="2"/><text x="145" y="412" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">minFrequency bucket</text>
+    <rect x="320" y="400" width="16" height="14" rx="2" fill="none" stroke="#10b981" stroke-width="2"/><text x="345" y="412" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Promoted node</text>
+    <rect x="490" y="400" width="16" height="14" rx="2" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="4,3" opacity="0.5"/><text x="515" y="412" fill="#94a3b8" font-family="Inter,sans-serif" font-size="10">Empty bucket (dimmed)</text>
+  </svg>
+
+  <h3 id="lfu-strengths-weaknesses"><span class="h3-anchor"></span>LFU — Strengths & Weaknesses</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ Strengths</div>
+      <ul>
+        <li><strong>Protects hot entries</strong> — an item accessed 1,000× won't be evicted by a one-time scan</li>
+        <li><strong>Resists scan pollution</strong> — scanner entries have low frequency, evicted immediately</li>
+        <li><strong>Stable workloads</strong> — when certain items are consistently popular, LFU keeps them cached</li>
+      </ul>
+    </div>
+    <div class="comparison-card bad">
+      <div class="comparison-card-title">❌ Weaknesses</div>
+      <ul>
+        <li><strong>Cold start problem</strong> — new entries start at freq=1, immediately vulnerable to eviction even if they'll become hot</li>
+        <li><strong>Stale popularity (cache pollution)</strong> — historically popular items retain high frequency even when no longer accessed. They resist eviction indefinitely</li>
+        <li><strong>Slow adaptation</strong> — if the popular set changes, LFU is slow to reflect it because old items have accumulated frequency</li>
+        <li><strong>Higher memory/complexity</strong> — two HashMaps, frequency buckets, minFrequency tracking</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Protects Hot Entries — Explained</div>
+    <p>In LFU, every access increments a frequency counter. An item accessed 1,000 times has freq=1000. A scan item that enters once has freq=1.</p>
+    <p>When the cache is full, LFU evicts the entry with the <strong>lowest frequency</strong>. The scan item (freq=1) gets evicted long before the hot item (freq=1000). The hot item's accumulated frequency acts like armor — it would take 999 new entries, each accessed more often, to displace it.</p>
+    <p>This is the fundamental advantage over LRU, where a single recent access can save any item regardless of history. In LRU, accessing a cold item once makes it "more valuable" than a hot item last accessed 2 seconds ago.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Resists Scan Pollution — Explained</div>
+    <p>Same scan scenario as LRU's weakness — a batch job reads D, E, F, G, H sequentially. But with LFU:</p>
+    <div class="math-block">
+Before scan:  A(freq=100) B(freq=80) C(freq=60) — hot items cached
+Scan D:       D enters with freq=1. Cache full → evict lowest freq.
+              D(freq=1) replaces whatever had the previous min freq.
+Scan E:       E enters with freq=1. D(freq=1) is now the lowest → D evicted.
+Scan F:       F enters with freq=1. E(freq=1) evicted.
+Scan G:       G enters with freq=1. F(freq=1) evicted.
+After scan:   A(freq=100) B(freq=80) C(freq=60) still safe!
+    </div>
+    <p>The scan items keep evicting <strong>each other</strong> because they all have freq=1 — the lowest possible. They never accumulate enough frequency to threaten the hot items. The scan rolls through the cache like water off a duck's back.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Slow Adaptation — Explained</div>
+    <p>This is the flip side of "protects hot entries." The same frequency armor that protects hot items becomes a problem when those items <strong>stop being hot</strong>.</p>
+    <p>Imagine product A was trending last week — accessed 10,000 times, so A.freq=10000. This week, product A is dead and product X is the new trend. X starts at freq=1:</p>
+    <div class="math-block">
+After 1 hour:    A.freq=10,000 (stale)   X.freq=100      → A still "wins"
+After 10 hours:  A.freq=10,000 (stale)   X.freq=1,000    → A still "wins"
+After 100 hours: A.freq=10,000 (stale)   X.freq=10,000   → Finally tied
+    </div>
+    <p>It took <strong>100 hours</strong> for the new trend to match the old one's frequency. During all that time, A occupied a cache slot uselessly, and any newer entries with freq &lt; 10,000 would be evicted before stale A.</p>
+    <p>LRU would have evicted A within seconds of the last access — because recency is the only signal, there's no historical baggage to burn through. This is exactly what W-TinyLFU's periodic frequency decay solves: by halving all counts regularly, old popularity naturally fades.</p>
+  </div>
+
+</section>
+
+<!-- ==================== DEEP DIVE: LRU vs LFU ==================== -->
+<section id="deep-dive-comparison">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--teal), var(--emerald));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="M12 22v-8.3a4 4 0 0 0-1.172-2.872L3 3"/><path d="m15 9 6-6"/></svg>
+    </span>
+    Deep Dive — LRU vs LFU Head-to-Head
+  </h2>
+
+  <h3 id="feature-comparison"><span class="h3-anchor"></span>Feature Comparison</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Aspect</th><th>LRU</th><th>LFU</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Eviction signal</strong></td><td>Recency (time since last access)</td><td>Frequency (total access count)</td></tr>
+        <tr><td><strong>Data structures</strong></td><td>1 HashMap + 1 DLL</td><td>2 HashMaps + N DLLs (one per frequency)</td></tr>
+        <tr><td><strong>Time complexity</strong></td><td>O(1) get/put</td><td>O(1) get/put</td></tr>
+        <tr><td><strong>Space per entry</strong></td><td>2 pointers (prev/next)</td><td>2 pointers + 1 int (frequency)</td></tr>
+        <tr><td><strong>Implementation</strong></td><td>~60 lines</td><td>~100 lines</td></tr>
+        <tr><td><strong>Scan resistance</strong></td><td>Poor — scans flush the cache</td><td>Good — scans don't build frequency</td></tr>
+        <tr><td><strong>Adaptation speed</strong></td><td>Fast — within one cache cycle</td><td>Slow — old frequencies linger</td></tr>
+        <tr><td><strong>Cold start</strong></td><td>Fair — new entry is MRU</td><td>Poor — new entry has freq=1</td></tr>
+        <tr><td><strong>Cache pollution</strong></td><td>Low — stale entries age out</td><td>High — stale popular entries resist eviction</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 id="workload-simulation"><span class="h3-anchor"></span>Workload Simulation</h3>
+  <div class="subsection-card">
+    <div class="subsection-card-title">Scenario 1 — Scan Pollution (LFU Wins)</div>
+    <div class="math-block" style="margin-bottom:12px;">
+<strong>Setup</strong>
+  Cache capacity = 5
+  Access pattern: A A A A B B B C C C [scan: D E F G H I J K L M] A B C
+    </div>
+
+    <div class="comparison-grid">
+      <div class="comparison-card bad">
+        <div class="comparison-card-title">❌ LRU — Destroyed by Scan</div>
+        <p><strong>After hot phase:</strong><br>[C, B, A, _, _] — all hot items cached ✓</p>
+        <p><strong>After scan (D→M):</strong><br>[M, L, K, J, I] — hot items A, B, C all evicted!</p>
+        <p><strong>Re-access A:</strong> MISS — must re-fetch<br><strong>Re-access B:</strong> MISS — must re-fetch<br><strong>Re-access C:</strong> MISS — must re-fetch</p>
+        <p style="margin:0;"><em>One scan wiped the entire useful cache.</em></p>
+      </div>
+      <div class="comparison-card good">
+        <div class="comparison-card-title">✅ LFU — Hot Entries Protected</div>
+        <p><strong>After hot phase:</strong><br>A(freq=4) B(freq=3) C(freq=3) — cached ✓</p>
+        <p><strong>After scan (D→M):</strong><br>A(4) B(3) C(3) still safe!<br>Each scan item enters at freq=1, immediately evicted by the next</p>
+        <p><strong>Re-access A:</strong> HIT → freq=5<br><strong>Re-access B:</strong> HIT → freq=4<br><strong>Re-access C:</strong> HIT → freq=4</p>
+        <p style="margin:0;"><em>Frequency shield blocked the scan entirely.</em></p>
+      </div>
+    </div>
+    <div class="info-box emerald">
+      <div class="info-box-title">🎯 Takeaway</div>
+      <p>LFU's frequency shield protects hot entries from being displaced by a sequential scan. This is LFU's strongest scenario.</p>
+    </div>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Scenario 2 — Stale Popularity (LRU Wins)</div>
+    <div class="math-block" style="margin-bottom:12px;">
+<strong>Setup</strong>
+  Cache capacity = 2
+  Access pattern: A×5  (A becomes "stale" — never accessed again)  then B×10
+    </div>
+
+    <div class="comparison-grid">
+      <div class="comparison-card good">
+        <div class="comparison-card-title">✅ LRU — Stale Entry Evicted Naturally</div>
+        <p><strong>After A×5:</strong><br>[A] — cached</p>
+        <p><strong>After B×10:</strong><br>[B, A] → eventually [B] — A evicted when not used</p>
+        <p><strong>New entry C arrives:</strong><br>A is gone. C gets cached. Correct behavior!</p>
+        <p style="margin:0;"><em>Stale entries age out automatically via recency.</em></p>
+      </div>
+      <div class="comparison-card bad">
+        <div class="comparison-card-title">❌ LFU — Stale Entry Stuck Forever</div>
+        <p><strong>After A×5:</strong><br>A(freq=5) — cached</p>
+        <p><strong>After B×10:</strong><br>B(freq=10), A(freq=5) — A still in cache!</p>
+        <p><strong>New entry C arrives:</strong><br>C enters at freq=1, immediately evicted before stale A(freq=5)</p>
+        <p style="margin:0;"><em>Historical frequency blocks new entries indefinitely.</em></p>
+      </div>
+    </div>
+    <div class="info-box rose">
+      <div class="info-box-title">⚠️ Takeaway</div>
+      <p>LFU's historical frequency count becomes a liability when access patterns shift. Once-popular items occupy cache indefinitely, starving new entries. This is the "frequency pollution" problem.</p>
+    </div>
+  </div>
+
+  <h3 id="when-to-use-which"><span class="h3-anchor"></span>When to Use Which</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <div class="comparison-card-title">✅ Use LRU When</div>
+      <ul>
+        <li><strong>Temporal locality</strong> — recently accessed items likely accessed again soon</li>
+        <li><strong>Shifting patterns</strong> — the "hot set" changes frequently</li>
+        <li><strong>Simple requirements</strong> — well-understood, easy to debug</li>
+        <li><strong>Uniform frequency</strong> — all items accessed at similar rates</li>
+      </ul>
+      <p style="margin-top:8px;font-size:0.82rem;"><em>Examples: Web browser cache, OS page cache, DB buffer pool, K8s controller caches</em></p>
+    </div>
+    <div class="comparison-card good" style="border-color: var(--amber);">
+      <div class="comparison-card-title" style="color: var(--amber);">📊 Use LFU When</div>
+      <ul>
+        <li><strong>Stable hot set</strong> — small set gets vast majority of requests consistently</li>
+        <li><strong>Scan-heavy workloads</strong> — periodic batch scans could pollute LRU</li>
+        <li><strong>CDN/content caching</strong> — popular content stays popular for extended periods</li>
+      </ul>
+      <p style="margin-top:8px;font-size:0.82rem;"><em>Examples: CDN edge caches, DNS resolvers, content recommendation caches</em></p>
+    </div>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Scan-Heavy Workloads — Why LFU Wins Here</div>
+    <p>"Scan-heavy" means scans aren't rare exceptions but regular, expected operations. Real examples: a data pipeline running hourly aggregations over every record, a search indexer that periodically crawls all documents, a monitoring system sweeping all metrics for alerting.</p>
+    <p>In these systems, LRU would be flushed on <strong>every scan cycle</strong>. Your hit rate would crater every hour when the batch job runs, slowly rebuild, then get destroyed again — a sawtooth pattern of terrible performance:</p>
+    <div class="math-block">
+LRU hit rate over time:
+  ████████▁▁████████▁▁████████▁▁
+          ↑          ↑          ↑
+       scan 1     scan 2     scan 3
+  (cache flushed each time, rebuilds slowly)
+
+LFU hit rate over time:
+  ██████████████████████████████
+  (scan items evict each other at freq=1, hot items untouched)
+    </div>
+    <p>LFU handles this gracefully because scan entries (freq=1) never displace genuinely popular entries. Your cache maintains a <strong>stable, high hit rate</strong> regardless of scan frequency. This is why CDN edge caches and DNS resolvers lean toward frequency-based eviction — they deal with periodic crawlers and bots that would pollute a recency-based cache.</p>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: THREAD SAFETY ==================== -->
+<section id="deep-dive-concurrency">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--rose), #e11d48);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    </span>
+    Deep Dive — Thread Safety & Concurrency
+  </h2>
+
+  <div class="term-def" id="term-readwrite-lock">
+    <div class="term-def-name">ReadWriteLock Pitfall</div>
+    <p>A <code>ReadWriteLock</code> allows multiple concurrent readers OR a single writer. The critical insight: LRU's <code>get()</code> is <strong>NOT a read-only operation</strong> — it modifies the linked list by moving the accessed node to the head. Therefore, both <code>get()</code> and <code>put()</code> require the <strong>write lock</strong>. Using a read lock for <code>get()</code> allows concurrent list mutations, causing data structure corruption.</p>
+  </div>
+
+  <h3 id="concurrent-lru"><span class="h3-anchor"></span>Thread-Safe LRU</h3>
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="kw">import</span> java.util.concurrent.locks.ReentrantReadWriteLock;
+
+<span class="kw">public class</span> <span class="ty">ConcurrentLRUCache</span> {
+    <span class="kw">private final</span> <span class="ty">LRUCache</span> cache;
+    <span class="kw">private final</span> <span class="ty">ReentrantReadWriteLock</span> lock = <span class="kw">new</span> <span class="ty">ReentrantReadWriteLock</span>();
+
+    <span class="kw">public</span> <span class="fn">ConcurrentLRUCache</span>(<span class="kw">int</span> capacity) {
+        <span class="kw">this</span>.cache = <span class="kw">new</span> <span class="fn">LRUCache</span>(capacity);
+    }
+
+    <span class="kw">public int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+        <span class="cm">// IMPORTANT: get() is NOT read-only in LRU!</span>
+        <span class="cm">// It modifies the linked list (moves node to head).</span>
+        <span class="cm">// Must use WRITE lock, not read lock.</span>
+        lock.<span class="fn">writeLock</span>().<span class="fn">lock</span>();
+        <span class="kw">try</span> {
+            <span class="kw">return</span> cache.<span class="fn">get</span>(key);
+        } <span class="kw">finally</span> {
+            lock.<span class="fn">writeLock</span>().<span class="fn">unlock</span>();
+        }
+    }
+
+    <span class="kw">public void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">int</span> value) {
+        lock.<span class="fn">writeLock</span>().<span class="fn">lock</span>();
+        <span class="kw">try</span> {
+            cache.<span class="fn">put</span>(key, value);
+        } <span class="kw">finally</span> {
+            lock.<span class="fn">writeLock</span>().<span class="fn">unlock</span>();
+        }
+    }
+}</pre>
+  </div>
+
+  <h3 id="concurrency-strategies"><span class="h3-anchor"></span>Concurrency Strategy Comparison</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Strategy</th><th>Pros</th><th>Cons</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Single global lock</strong></td><td>Simple, correct</td><td>Contention under high concurrency</td></tr>
+        <tr><td><strong>Striped locks</strong></td><td>Less contention (N buckets)</td><td>Complex; LRU list ops still need global coordination</td></tr>
+        <tr><td><strong>Lock-free (CAS)</strong></td><td>Maximum throughput</td><td>Extremely complex, hard to verify, rarely worth it</td></tr>
+        <tr><td><strong>Buffered writes (Caffeine)</strong></td><td>get() is nearly lock-free</td><td>Events are buffered and applied in batch by a drain thread</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box">
+    <div class="info-box-title">🏭 Production Recommendation</div>
+    <p>For most applications, a single global lock is sufficient. Java's Caffeine library uses a buffered-write approach inspired by database WAL — access events are recorded in a lock-free ring buffer and a single drain thread applies them to the LRU list periodically. This makes reads nearly lock-free while maintaining correct ordering.</p>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: TTL ==================== -->
+<section id="deep-dive-ttl">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--sky), var(--cyan));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </span>
+    Deep Dive — TTL Integration
+  </h2>
+
+  <div class="term-def" id="term-ttl">
+    <div class="term-def-name">Time-To-Live (TTL)</div>
+    <p>A per-entry expiration time after which the entry is considered stale and should no longer be served. Pure LRU/LFU don't consider time — an entry from 30 days ago with a recent access is treated the same as one from 5 minutes ago. TTL adds temporal correctness to the cache.</p>
+  </div>
+
+  <h3 id="ttl-approaches"><span class="h3-anchor"></span>TTL Implementation Approaches</h3>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Approach 1 — Lazy Expiry (Check on Access)</div>
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">Java</span>
+        <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+      </div>
+      <pre><span class="kw">public int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+    <span class="ty">Node</span> node = map.<span class="fn">get</span>(key);
+    <span class="kw">if</span> (node == <span class="kw">null</span>) <span class="kw">return</span> -<span class="nu">1</span>;
+    <span class="kw">if</span> (System.<span class="fn">currentTimeMillis</span>() > node.expiresAt) {
+        <span class="cm">// Expired — treat as miss, remove</span>
+        <span class="fn">removeNode</span>(node);
+        map.<span class="fn">remove</span>(key);
+        <span class="kw">return</span> -<span class="nu">1</span>;
+    }
+    <span class="fn">moveToHead</span>(node);
+    <span class="kw">return</span> node.value;
+}</pre>
+    </div>
+    <p><strong>Pro:</strong> Zero background overhead. <strong>Con:</strong> Expired entries occupy memory until accessed.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Approach 2 — Background Sweep</div>
+    <div class="code-block">
+      <div class="code-header">
+        <span class="code-lang">Java</span>
+        <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+      </div>
+      <pre><span class="ty">ScheduledExecutorService</span> sweeper = <span class="ty">Executors</span>.<span class="fn">newSingleThreadScheduledExecutor</span>();
+sweeper.<span class="fn">scheduleAtFixedRate</span>(() -> {
+    <span class="kw">for</span> (<span class="ty">Map.Entry</span>&lt;<span class="ty">Integer</span>, <span class="ty">Node</span>&gt; entry : map.<span class="fn">entrySet</span>()) {
+        <span class="kw">if</span> (System.<span class="fn">currentTimeMillis</span>() > entry.<span class="fn">getValue</span>().expiresAt) {
+            <span class="fn">removeNode</span>(entry.<span class="fn">getValue</span>());
+            map.<span class="fn">remove</span>(entry.<span class="fn">getKey</span>());
+        }
+    }
+}, <span class="nu">60</span>, <span class="nu">60</span>, <span class="ty">TimeUnit</span>.SECONDS);</pre>
+    </div>
+    <p><strong>Pro:</strong> Proactively frees memory. <strong>Con:</strong> O(n) sweep cost, needs locking, sweep interval is a tuning knob.</p>
+  </div>
+
+  <div class="info-box emerald">
+    <div class="info-box-title">✅ Recommended: Both (Lazy + Background)</div>
+    <p>Use lazy expiry on <code>get()</code> for correctness (never serve stale data) combined with a background sweep for memory reclamation (don't let expired entries accumulate). This is the standard production approach used by Redis, Caffeine, and Memcached.</p>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: DESIGN DECISIONS ==================== -->
+<section id="deep-dive-design">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--violet), var(--indigo));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6"/><path d="m4.22 4.22 4.24 4.24m5.08 5.08 4.24 4.24"/><path d="M1 12h6m6 0h6"/><path d="m4.22 19.78 4.24-4.24m5.08-5.08 4.24-4.24"/></svg>
+    </span>
+    Deep Dive — Design Decisions & Tradeoffs
+  </h2>
+
+  <h3 id="count-vs-size"><span class="h3-anchor"></span>Count-Based vs Size-Based Capacity</h3>
+  <div class="comparison-grid">
+    <div class="comparison-card good">
+      <div class="comparison-card-title">📐 Count-Based (maxEntries=1000)</div>
+      <ul>
+        <li>Simple — evict one entry per insert over capacity</li>
+        <li>Assumes entries are roughly equal size</li>
+        <li>Fails when sizes vary (1KB metadata vs 10MB image)</li>
+      </ul>
+      <p><em>Use when: entries are same type, similar size (DB rows, config)</em></p>
+    </div>
+    <div class="comparison-card good" style="border-color: var(--amber);">
+      <div class="comparison-card-title" style="color: var(--amber);">📏 Size-Based (maxBytes=256MB)</div>
+      <ul>
+        <li>Tracks byte size per entry, evicts in a loop until room</li>
+        <li>Must reject entries exceeding total cache size</li>
+        <li>More accurate memory control</li>
+      </ul>
+      <p><em>Use when: entries vary in size (HTTP responses, files, blobs)</em></p>
+    </div>
+  </div>
+
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java — Size-Bounded Eviction</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="kw">public void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">byte</span>[] value) {
+    <span class="kw">long</span> newSize = value.length;
+    <span class="kw">if</span> (newSize > maxBytes) <span class="kw">return</span>; <span class="cm">// reject — don't flush everything</span>
+
+    <span class="cm">// Evict LRU entries in a loop until there's room</span>
+    <span class="kw">while</span> (currentBytes + newSize > maxBytes && !<span class="fn">isEmpty</span>()) {
+        <span class="ty">Node</span> lru = tail.prev;
+        currentBytes -= lru.size;
+        <span class="fn">removeNode</span>(lru);
+        map.<span class="fn">remove</span>(lru.key);
+    }
+
+    <span class="ty">Node</span> node = <span class="kw">new</span> <span class="fn">Node</span>(key, value, newSize);
+    <span class="fn">addToHead</span>(node);
+    map.<span class="fn">put</span>(key, node);
+    currentBytes += newSize;
+}</pre>
+  </div>
+
+  <h3 id="hashmap-optimization"><span class="h3-anchor"></span>HashMap Load Factor Optimization</h3>
+  <div class="math-block">
+<strong>Problem:</strong> Default HashMap resizes multiple times as cache fills
+<strong>Solution:</strong> Pre-size to avoid resizing
+
+  capacity / load_factor + 1 = initial HashMap size
+  1000 / 0.75 + 1 = 1334  →  new HashMap<>(1334, 0.75f)
+
+<strong>Result:</strong> Zero rehashes, reduced GC pressure
+  </div>
+
+  <div class="code-block">
+    <div class="code-header">
+      <span class="code-lang">Java</span>
+      <button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+    </div>
+    <pre><span class="cm">// Bad — resizes HashMap multiple times as cache fills</span>
+<span class="ty">Map</span>&lt;<span class="ty">Integer</span>, <span class="ty">Node</span>&gt; map = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+
+<span class="cm">// Good — pre-size to avoid resizing</span>
+<span class="ty">Map</span>&lt;<span class="ty">Integer</span>, <span class="ty">Node</span>&gt; map = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;(capacity * <span class="nu">4</span> / <span class="nu">3</span> + <span class="nu">1</span>, <span class="nu">0.75f</span>);</pre>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: COMMON PITFALLS ==================== -->
+<section id="deep-dive-pitfalls">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--rose), #e11d48);">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </span>
+    Deep Dive — Common Pitfalls
+  </h2>
+
+  <p>These are the bugs interviewers watch for. Getting the implementation right but falling into one of these traps is a common failure mode. Each pitfall includes a code example showing the bug and the fix.</p>
+
+  <h3 id="lru-pitfalls"><span class="h3-anchor"></span>LRU Pitfalls</h3>
+
+  <div class="pitfall-card" id="pitfall-readwrite-lock">
+    <div class="pitfall-card-title">🐛 Using ReadWriteLock Incorrectly</div>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">Java — BUG</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+      <pre><span class="cm">// BUG: get() is NOT read-only — it modifies the linked list</span>
+lock.<span class="fn">readLock</span>().<span class="fn">lock</span>();
+<span class="kw">try</span> {
+    <span class="kw">return</span> cache.<span class="fn">get</span>(key); <span class="cm">// MOVES node to head — this is a WRITE</span>
+} <span class="kw">finally</span> {
+    lock.<span class="fn">readLock</span>().<span class="fn">unlock</span>();
+}</pre>
+    </div>
+    <p>Multiple threads holding read locks will concurrently modify the linked list, causing pointer corruption. Always use the <strong>write lock</strong> for both <code>get()</code> and <code>put()</code>.</p>
+  </div>
+
+  <div class="pitfall-card" id="pitfall-hashmap-remove">
+    <div class="pitfall-card-title">🐛 Forgetting to Remove from HashMap on Eviction</div>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">Java — BUG</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+      <pre><span class="ty">Node</span> lru = tail.prev;
+<span class="fn">removeNode</span>(lru);
+<span class="cm">// map.remove(lru.key); ← MISSING! Dangling reference in HashMap</span></pre>
+    </div>
+    <p>The HashMap now has a dangling reference to a disconnected node. This causes memory leaks and incorrect <code>get()</code> results (finds node in HashMap but it's not in the list).</p>
+  </div>
+
+  <div class="pitfall-card" id="pitfall-key-in-node">
+    <div class="pitfall-card-title">🐛 Not Storing Key in Node</div>
+    <p>When evicting the tail node, you need its key to remove it from the HashMap. Without the key in the Node, you'd need an O(n) HashMap scan — breaking your O(1) guarantee.</p>
+  </div>
+
+  <h3 id="lfu-pitfalls"><span class="h3-anchor"></span>LFU Pitfalls</h3>
+
+  <div class="pitfall-card" id="pitfall-min-freq-reset">
+    <div class="pitfall-card-title">🐛 Not Resetting minFrequency on New Insert</div>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">Java — BUG</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+      <pre><span class="ty">Node</span> newNode = <span class="kw">new</span> <span class="fn">Node</span>(key, value); <span class="cm">// freq = 1</span>
+keyMap.<span class="fn">put</span>(key, newNode);
+freqMap.<span class="fn">computeIfAbsent</span>(<span class="nu">1</span>, k -> <span class="kw">new</span> <span class="ty">DoublyLinkedList</span>()).<span class="fn">addToHead</span>(newNode);
+<span class="cm">// minFrequency = 1; ← MISSING! minFrequency might still be 5</span></pre>
+    </div>
+    <p>Without resetting <code>minFrequency = 1</code>, the next eviction targets the wrong bucket (e.g., bucket 5 instead of 1), evicting the wrong entry or crashing on an empty list.</p>
+  </div>
+
+  <div class="pitfall-card" id="pitfall-empty-bucket">
+    <div class="pitfall-card-title">🐛 Not Incrementing minFrequency When Its Bucket Empties</div>
+    <p>When promoting a node from the <code>minFrequency</code> bucket and that bucket becomes empty, failing to increment <code>minFrequency</code> means the next eviction will try to evict from an empty list. Optionally, also remove the empty DLL from <code>freqMap</code> to prevent memory leak from accumulated empty lists.</p>
+  </div>
+
+  <h3 id="general-pitfalls"><span class="h3-anchor"></span>General Pitfalls</h3>
+
+  <div class="pitfall-card" id="pitfall-put-existing">
+    <div class="pitfall-card-title">🐛 put() on Existing Key Not Treated as Access</div>
+    <p>Both LRU and LFU must handle <code>put(existingKey, newValue)</code> as an access event: LRU moves it to head, LFU increments its frequency. A common bug is treating it as a simple value update without adjusting ordering/frequency metadata.</p>
+  </div>
+
+  <div class="pitfall-card" id="pitfall-capacity-zero">
+    <div class="pitfall-card-title">🐛 Capacity Zero Not Handled</div>
+    <p>If <code>capacity = 0</code>, every <code>get()</code> should return -1 and every <code>put()</code> should be a no-op. Without explicit handling, division by zero or negative capacity can cause unexpected behavior.</p>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: VARIANTS ==================== -->
+<section id="deep-dive-variants">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--teal), var(--emerald));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="10"/></svg>
+    </span>
+    Deep Dive — Variants & Hybrid Approaches
+  </h2>
+
+  <h3 id="variant-lru-k"><span class="h3-anchor"></span>LRU-K</h3>
+  <div class="term-def">
+    <div class="term-def-name">LRU-K</div>
+    <p>Tracks the K-th most recent access time for each entry. Evicts the entry whose K-th access is oldest. LRU is LRU-1. LRU-2 requires an entry to be accessed at least twice before it's "established," which resists scan pollution. Commonly used in database buffer pools.</p>
+  </div>
+
+  <h3 id="variant-2q"><span class="h3-anchor"></span>2Q (Two-Queue)</h3>
+  <div class="term-def">
+    <div class="term-def-name">2Q (Two-Queue)</div>
+    <p>Uses two queues: <strong>A1 (FIFO)</strong> for new entries and <strong>Am (LRU)</strong> for entries promoted on second access. An entry must be accessed twice to earn LRU protection. Single-access scan items never leave A1, preventing scan pollution of the main LRU cache. Similar in spirit to LRU-2 but more practical to implement.</p>
+  </div>
+
+  <h3 id="variant-arc"><span class="h3-anchor"></span>ARC (Adaptive Replacement Cache)</h3>
+  <div class="term-def">
+    <div class="term-def-name">ARC (Adaptive Replacement Cache)</div>
+    <p>IBM's patented algorithm (expired 2024) that dynamically balances recency and frequency. Maintains two LRU lists — L1 (recency) and L2 (frequency) — plus "ghost" lists of recently evicted entries. The ghost lists detect which signal (recency or frequency) is more predictive of the current workload and dynamically adjust the size split. ARC is the gold standard for adaptive caching but was patent-encumbered until recently.</p>
+  </div>
+
+  <h3 id="variant-wtinylfu"><span class="h3-anchor"></span>W-TinyLFU (Caffeine)</h3>
+  <div class="info-box violet">
+    <div class="info-box-title">🏆 State of the Art — W-TinyLFU</div>
+    <p>Used by Java's Caffeine library, the best-in-class cache implementation. Achieves near-optimal hit rates across diverse workloads.</p>
+  </div>
+
+  <div class="term-def" id="term-count-min-sketch">
+    <div class="term-def-name">Count-Min Sketch</div>
+    <p>A probabilistic data structure that estimates the frequency of elements in a data stream using sublinear memory. It can overcount (due to hash collisions) but never undercount. W-TinyLFU uses it as a lightweight frequency estimator — far cheaper than maintaining exact counts per entry like classic LFU.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">W-TinyLFU Architecture</div>
+    <div class="flow-diagram">
+      <div class="flow-node sky">Window Cache<br><small>1%, LRU</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node violet">TinyLFU Filter<br><small>Count-Min Sketch</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node emerald">Main Cache<br><small>99%, Segmented LRU</small></div>
+    </div>
+    <p><strong>Window cache (1% of capacity, LRU):</strong> Absorbs burst traffic and new entries. Prevents cold start by giving new entries a chance to build frequency.</p>
+    <p><strong>TinyLFU admission filter:</strong> A Count-Min Sketch estimates frequency with minimal memory. When an entry is evicted from the window cache, it must have higher estimated frequency than the entry it would replace in the main cache. This prevents cache pollution.</p>
+    <p><strong>Main cache (99%, segmented LRU):</strong> Split into "probationary" and "protected" segments. Entries earn their way in through the frequency filter.</p>
+    <p><strong>Periodic frequency decay:</strong> All counts in the Count-Min Sketch are halved periodically (e.g., every N accesses). This solves LFU's stale popularity problem — historical frequency naturally decays over time.</p>
+  </div>
+
+  <h3 id="variant-clock"><span class="h3-anchor"></span>CLOCK</h3>
+  <div class="term-def">
+    <div class="term-def-name">CLOCK Algorithm</div>
+    <p>An approximation of LRU used in OS page replacement. Entries are arranged in a circular buffer with a "reference bit." On access, the bit is set to 1. On eviction, a clock hand sweeps the buffer: if a bit is 1, clear it and move on; if 0, evict that entry. Approximates LRU without the overhead of maintaining a linked list — no pointer mutation on read, making it naturally concurrent-friendly.</p>
+  </div>
+
+  <h3 id="variant-summary"><span class="h3-anchor"></span>Variant Comparison Summary</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Variant</th><th>Key Innovation</th><th>Used In</th><th>Complexity</th></tr></thead>
+      <tbody>
+        <tr><td><strong>LRU-K</strong></td><td>K-th access time as eviction signal</td><td>Database buffer pools</td><td>Medium</td></tr>
+        <tr><td><strong>2Q</strong></td><td>Two-stage admission (FIFO → LRU)</td><td>Database buffer pools</td><td>Low</td></tr>
+        <tr><td><strong>ARC</strong></td><td>Adaptive recency/frequency balance</td><td>ZFS, IBM storage</td><td>High</td></tr>
+        <tr><td><strong>W-TinyLFU</strong></td><td>Frequency sketch + admission filter</td><td>Java Caffeine</td><td>Medium</td></tr>
+        <tr><td><strong>CLOCK</strong></td><td>Circular buffer, reference bits</td><td>Linux page cache, PostgreSQL</td><td>Low</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ==================== DEEP DIVE: INTERVIEW QUESTIONS ==================== -->
+<section id="deep-dive-interview-questions">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--emerald), var(--teal));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </span>
+    Deep Dive — Interview Questions & Answers
+  </h2>
+
+  <h3 id="hld-interview-questions"><span class="h3-anchor"></span>High-Level Design Questions</h3>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q1: Design a caching system for a web app serving 10K requests/second</div>
+    <p><strong>Scale:</strong> At 10K RPS, an in-process LRU cache is sufficient (sub-microsecond latency). If data is shared across servers, add a distributed cache layer (Redis/Memcached) in front of the DB.</p>
+    <p><strong>Policy:</strong> LRU for general web traffic — strong temporal locality. User sessions, auth tokens, and API responses all exhibit recency patterns.</p>
+    <p><strong>TTL:</strong> Different TTLs by content type: static assets get long TTL (hours), API responses get short TTL (seconds to minutes).</p>
+    <p><strong>Pattern:</strong> Cache-aside for simplicity. Application checks cache first, falls through to DB on miss, populates cache on response.</p>
+    <p><strong>Thundering herd:</strong> When a popular key expires, 1,000 requests simultaneously try to populate it. Solve with singleflight/mutex per key — only one request fetches from DB, others wait for that result.</p>
+
+    <div class="subsection-card">
+      <div class="subsection-card-title">Thundering Herd — Double-Checked Locking Solution</div>
+      <p>The core pattern: check cache → miss → acquire lock → check cache <strong>again</strong> (someone else may have populated it while you waited) → still miss → you fetch. The second check is critical — without it, every thread still hits the DB, just serialized instead of concurrent.</p>
+
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">Java — Global Lock (Simple)</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+        <pre><span class="kw">public class</span> <span class="ty">ThunderingHerdCache</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; {
+    <span class="kw">private final</span> <span class="ty">LRUCache</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; cache;
+    <span class="kw">private final</span> <span class="ty">Object</span> lock = <span class="kw">new</span> <span class="ty">Object</span>();
+
+    <span class="kw">public</span> <span class="ty">V</span> <span class="fn">get</span>(<span class="ty">K</span> key, <span class="ty">Function</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; dbFetcher) {
+        <span class="cm">// Check 1: no lock needed</span>
+        <span class="ty">V</span> cached = cache.<span class="fn">get</span>(key);
+        <span class="kw">if</span> (cached != <span class="kw">null</span>) <span class="kw">return</span> cached;
+
+        <span class="kw">synchronized</span> (lock) {
+            <span class="cm">// Check 2 (DOUBLE CHECK): another thread may have</span>
+            <span class="cm">// populated this key while we waited for the lock</span>
+            cached = cache.<span class="fn">get</span>(key);
+            <span class="kw">if</span> (cached != <span class="kw">null</span>) <span class="kw">return</span> cached;
+
+            <span class="cm">// Still miss — I'm the one who fetches</span>
+            <span class="ty">V</span> value = dbFetcher.<span class="fn">apply</span>(key);
+            cache.<span class="fn">put</span>(key, value);
+            <span class="kw">return</span> value;
+        }
+    }
+}
+<span class="cm">// Downside: global lock — miss on "product:123" blocks</span>
+<span class="cm">// threads waiting for unrelated "user:456"</span></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-header"><span class="code-lang">Java — Per-Key Lock (Better Concurrency)</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+        <pre><span class="kw">public class</span> <span class="ty">ThunderingHerdCache</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; {
+    <span class="kw">private final</span> <span class="ty">LRUCache</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; cache;
+    <span class="kw">private final</span> <span class="ty">HashMap</span>&lt;<span class="ty">K</span>, <span class="ty">Object</span>&gt; keyLocks = <span class="kw">new</span> <span class="ty">HashMap</span>&lt;&gt;();
+
+    <span class="kw">private</span> <span class="ty">Object</span> <span class="fn">getLockForKey</span>(<span class="ty">K</span> key) {
+        <span class="cm">// Short critical section — just get/create the lock object</span>
+        <span class="kw">synchronized</span> (keyLocks) {
+            <span class="kw">return</span> keyLocks.<span class="fn">computeIfAbsent</span>(key, k -> <span class="kw">new</span> <span class="ty">Object</span>());
+        }
+    }
+
+    <span class="kw">public</span> <span class="ty">V</span> <span class="fn">get</span>(<span class="ty">K</span> key, <span class="ty">Function</span>&lt;<span class="ty">K</span>, <span class="ty">V</span>&gt; dbFetcher) {
+        <span class="cm">// Check 1: no lock</span>
+        <span class="ty">V</span> cached = cache.<span class="fn">get</span>(key);
+        <span class="kw">if</span> (cached != <span class="kw">null</span>) <span class="kw">return</span> cached;
+
+        <span class="cm">// Only threads requesting the SAME key compete here</span>
+        <span class="ty">Object</span> keyLock = <span class="fn">getLockForKey</span>(key);
+
+        <span class="kw">synchronized</span> (keyLock) {
+            <span class="cm">// Check 2: double-check</span>
+            cached = cache.<span class="fn">get</span>(key);
+            <span class="kw">if</span> (cached != <span class="kw">null</span>) <span class="kw">return</span> cached;
+
+            <span class="ty">V</span> value = dbFetcher.<span class="fn">apply</span>(key);
+            cache.<span class="fn">put</span>(key, value);
+            <span class="kw">return</span> value;
+        }
+    }
+}
+<span class="cm">// "product:123" and "user:456" now fetch in parallel</span>
+<span class="cm">// Tradeoff: keyLocks map grows unboundedly — needs cleanup</span></pre>
+      </div>
+
+      <div class="info-box">
+        <div class="info-box-title">🎯 Why Double-Check Matters</div>
+        <p><strong>Without double-check:</strong> Every thread hits the DB — just serialized instead of concurrent. You turned a stampede into a queue, but still N queries.</p>
+        <p><strong>With double-check:</strong> Thread 1 fetches and populates cache. Threads 2–1000 acquire the lock, see the value in cache on the second check, and return immediately. <strong>1 DB query instead of 1,000.</strong></p>
+      </div>
+    </div>
+
+    <p><strong>Cache warming:</strong> On cold start, pre-populate from database for known hot keys to avoid a miss spike.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q2: How would you design a CDN's edge cache eviction policy?</div>
+    <p><strong>LFU over LRU:</strong> Popular content (viral videos, trending images) stays popular for days/weeks. LRU would evict them if a batch of new content is uploaded. LFU's frequency shield protects them.</p>
+    <p><strong>Time-windowed frequency:</strong> Pure LFU has stale popularity — combine with windowed frequency counting (only count accesses in last 24h). W-TinyLFU's periodic decay achieves this naturally.</p>
+    <p><strong>Size-weighted eviction:</strong> A 100MB video costs 20,000× more cache space than a 5KB CSS file. Consider <code>frequency / size</code> as the eviction priority — evict large, rarely-accessed items first.</p>
+    <p><strong>Multi-tier:</strong> Memory (hot, small) → SSD (warm, large) → Origin (cold, fetch). Different eviction policies per tier.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q3: You're designing a database buffer pool. Which eviction policy?</div>
+    <p><strong>LRU-2 or 2Q, not simple LRU.</strong> Database workloads mix random lookups (high locality, cache-friendly) with sequential scans (full table scans — cache-hostile). A simple LRU cache would be destroyed by every <code>SELECT * FROM large_table</code>.</p>
+    <p><strong>LRU-2:</strong> Requires two accesses before an entry earns cache residency. Single-pass scan pages never make it past the probationary stage.</p>
+    <p><strong>Real-world:</strong> MySQL InnoDB uses a modified LRU with "young" and "old" sublists (similar to 2Q). PostgreSQL uses a CLOCK variant for shared buffers.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q4: Your LRU cache's get() takes 2ms at p99 under high concurrency. Optimize it.</div>
+    <p><strong>Diagnosis:</strong> The single global lock is contended. All threads compete for the same lock on every get().</p>
+    <p><strong>Option 1 — Striped locking:</strong> Partition keys into N buckets, each with its own lock + LRU list. Reduces contention N-fold. Tradeoff: each partition has its own LRU order (less globally optimal eviction).</p>
+    <p><strong>Option 2 — Caffeine-style buffered writes:</strong> Record access events in a lock-free ring buffer. A single drain thread periodically applies them to the LRU list. <code>get()</code> becomes nearly lock-free — just a HashMap read + buffer append.</p>
+    <p><strong>Option 3 — CLOCK approximation:</strong> Replace the DLL with a circular buffer + reference bits. No move-to-head on access — just set a bit. Less accurate but eliminates list mutation on read entirely.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q4: Design a cache for a Kubernetes controller that reconciles 500 resources every 5 minutes</div>
+    <p><strong>Policy — LRU, not LFU:</strong> All resources are accessed at the same frequency (once per reconcile cycle). LFU degenerates to random eviction under uniform access. LRU naturally keeps the most recently reconciled resources cached.</p>
+    <p><strong>Cache key:</strong> Resource identity — <code>namespace/name/resourceVersion</code>. The resourceVersion ensures stale versions don't pollute the cache.</p>
+    <p><strong>Size-based limit:</strong> Resources vary in size (a ConfigMap might be 1KB, a large CRD might be 50KB). Use byte-based <code>maxBytes</code> tied to the pod's memory limit — not entry count. This directly maps to the pod's memory budget and prevents OOM kills.</p>
+    <p><strong>TTL for correctness:</strong> Mutable resources need short TTL to detect upstream changes. Even with a watch stream, TTL acts as a safety net against missed events.</p>
+    <p><strong>OnEvict callback:</strong> Fire a Prometheus metric on each eviction to track cache churn. Don't import Prometheus into the cache package — use a callback function to keep the cache generic.</p>
+    <p><strong>OOM risk:</strong> An unbounded cache in a controller pod is a ticking time bomb. The pod will be OOM-killed under memory pressure. <code>maxBytes</code> is critical, not optional.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q5: How would you handle cache warming after a pod restart?</div>
+    <p><strong>Problem:</strong> Cold cache after restart = spike in cache misses = spike in backend/API server load. If multiple pods restart simultaneously (rolling deployment), the miss storm multiplies.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Approach</th><th>How It Works</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Accept cold start</strong></td><td>Let cache fill naturally through normal traffic/reconciliation</td><td>Simplest. Cache fills within one reconcile cycle (~5 min). Usually acceptable.</td></tr>
+          <tr><td><strong>Persist to disk (PVC)</strong></td><td>Serialize cache to a PersistentVolumeClaim before shutdown, reload on startup</td><td>Survives restarts but adds I/O complexity and stale data risk. Snapshot may be outdated.</td></tr>
+          <tr><td><strong>Peer-based warming</strong></td><td>On startup, fetch hot keys from sibling pods via gRPC/HTTP</td><td>Fast warming but adds cross-pod dependency. Fails if all pods restart simultaneously.</td></tr>
+          <tr><td><strong>Background pre-fetch</strong></td><td>On startup, proactively list/fetch known-needed resources before serving traffic</td><td>Warm cache before first request. Adds startup latency. Need to know which keys are hot.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="info-box emerald">
+      <div class="info-box-title">🎯 Recommended for K8s Controllers</div>
+      <p>Accept cold start. The reconcile loop naturally populates the cache within one cycle (~5 min). The added complexity of disk persistence or peer warming is rarely justified for controller workloads. For user-facing services with strict latency SLAs, background pre-fetch is the best option.</p>
+    </div>
+  </div>
+
+  <h3 id="implementation-interview-questions"><span class="h3-anchor"></span>Implementation Questions</h3>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q5: Modify your LRU cache to support per-entry TTL</div>
+    <p>Add an <code>expiresAt</code> field to the Node, set during <code>put()</code>, and check during <code>get()</code>:</p>
+    <div class="code-block">
+      <div class="code-header"><span class="code-lang">Java</span><button class="code-copy" onclick="copyCode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+      <pre><span class="kw">static class</span> <span class="ty">Node</span> {
+    <span class="kw">int</span> key, value;
+    <span class="kw">long</span> expiresAt;  <span class="cm">// System.currentTimeMillis() + ttlMillis</span>
+    <span class="ty">Node</span> prev, next;
+}
+
+<span class="kw">public int</span> <span class="fn">get</span>(<span class="kw">int</span> key) {
+    <span class="ty">Node</span> node = map.<span class="fn">get</span>(key);
+    <span class="kw">if</span> (node == <span class="kw">null</span>) <span class="kw">return</span> -<span class="nu">1</span>;
+    <span class="kw">if</span> (System.<span class="fn">currentTimeMillis</span>() > node.expiresAt) {
+        <span class="cm">// Expired — treat as cache miss, remove immediately</span>
+        <span class="fn">removeNode</span>(node);
+        map.<span class="fn">remove</span>(key);
+        <span class="kw">return</span> -<span class="nu">1</span>;
+    }
+    <span class="fn">moveToHead</span>(node);
+    <span class="kw">return</span> node.value;
+}
+
+<span class="kw">public void</span> <span class="fn">put</span>(<span class="kw">int</span> key, <span class="kw">int</span> value, <span class="kw">long</span> ttlMillis) {
+    <span class="ty">Node</span> newNode = <span class="kw">new</span> <span class="fn">Node</span>(key, value);
+    newNode.expiresAt = System.<span class="fn">currentTimeMillis</span>() + ttlMillis;
+    <span class="cm">// ... rest of standard put() logic</span>
+}</pre>
+    </div>
+    <div class="info-box amber">
+      <div class="info-box-title">⚠️ Common Follow-Up: "Expired entries still occupy memory"</div>
+      <p>Lazy expiry on <code>get()</code> ensures correctness (never serve stale) but doesn't reclaim memory from unaccessed expired entries. Two solutions:</p>
+      <p>• <strong>Background sweep thread</strong> — periodically scan and remove expired entries. O(n) cost per sweep. See <a href="#ttl-approaches" style="color:var(--indigo)">TTL Integration section</a>.</p>
+      <p>• <strong>DelayQueue&lt;Node&gt;</strong> — a priority queue sorted by <code>expiresAt</code>. A drain thread calls <code>queue.take()</code> which blocks until the next entry expires, then removes it. More efficient than periodic sweeps — zero wasted scans.</p>
+    </div>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q6: What happens if all entries in your LFU cache have the same frequency?</div>
+    <p>LFU degenerates to LRU within that frequency bucket. It evicts the least recently used entry among those with the minimum frequency. This is by design — the DLL within each frequency bucket maintains recency order, and eviction takes from the tail (least recent).</p>
+    <p>This is also why LFU is a <strong>poor choice</strong> for workloads with uniform access frequency — it provides no advantage over LRU but adds implementation complexity.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q6: Can you implement LRU without a doubly linked list?</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Alternative</th><th>Eviction</th><th>Update</th><th>Tradeoff</th></tr></thead>
+        <tbody>
+          <tr><td>LinkedHashMap (Java)</td><td>O(1)</td><td>O(1)</td><td>Same implementation internally — uses DLL</td></tr>
+          <tr><td>Timestamp-based</td><td>O(n) scan</td><td>O(1)</td><td>Simple but O(n) eviction breaks requirement</td></tr>
+          <tr><td>Min-heap by access time</td><td>O(log n)</td><td>O(log n)</td><td>Better than scan but worse than DLL</td></tr>
+          <tr><td>CLOCK (circular buffer)</td><td>O(1) amortized</td><td>O(1)</td><td>Approximate — not exact LRU</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The HashMap + DLL approach is optimal at O(1) for all operations. Interviewers expect this answer, but knowing the alternatives shows breadth.</p>
+  </div>
+
+  <div class="subsection-card">
+    <div class="subsection-card-title">Q7: How does Java's LinkedHashMap implement LRU internally?</div>
+    <p><code>LinkedHashMap</code> extends <code>HashMap</code> and threads a doubly-linked list through all entries. Each <code>Entry</code> has <code>before</code> and <code>after</code> pointers. With <code>accessOrder=true</code>, <code>get()</code> calls <code>afterNodeAccess()</code> which moves the entry to the tail (most recent). <code>put()</code> calls <code>afterNodeInsertion()</code> which checks <code>removeEldestEntry()</code> — if true, removes the head (LRU entry).</p>
+    <p>So internally, it's the <strong>exact same HashMap + DLL pattern</strong> — Java just provides it as a library class.</p>
+  </div>
+</section>
+
+<!-- ==================== INTERVIEW TIPS ==================== -->
+<section id="interview-tips">
+  <span class="section-anchor"></span>
+  <h2>
+    <span class="section-icon" style="background: linear-gradient(135deg, var(--violet), var(--indigo));">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+    </span>
+    Interview Tips
+  </h2>
+
+  <div class="tips-grid">
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Always Start with Sentinel Nodes</div>
+      <p>Mention sentinels immediately when drawing the DLL. It signals clean coding practice and eliminates null-check edge cases that waste interview time debugging.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Store Key in Node</div>
+      <p>Proactively explain why: "We need the key in the node so we can remove it from the HashMap when evicting." This shows you've thought about the full eviction path.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>get() Mutates — Address Concurrency</div>
+      <p>When asked about thread safety, lead with: "LRU's get() is a write operation — it modifies the DLL. You can't use a read lock." This is the #1 concurrency gotcha.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Know the Tradeoffs, Not Just the Mechanics</div>
+      <p>Interviewers ask "LRU or LFU?" to test judgment, not just implementation. Discuss scan pollution (LRU's weakness) and stale popularity (LFU's weakness) to show depth.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Mention W-TinyLFU for Bonus Points</div>
+      <p>"In production, Caffeine uses W-TinyLFU — a Count-Min Sketch admission filter that combines LRU's adaptability with LFU's scan resistance, plus periodic frequency decay to avoid stale popularity." This shows you know state-of-the-art.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Explain minFrequency's Correctness</div>
+      <p>For LFU, proactively explain why minFrequency works without scanning: "It only changes on insert (reset to 1) and on promotion from the min bucket (increment). It never needs to decrease or skip."</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Draw Before You Code</div>
+      <p>Sketch the HashMap → DLL structure with 3-4 nodes before writing any code. Show the eviction path visually. Interviewers care about clear communication as much as correct code.</p>
+    </div>
+    <div class="tip-card">
+      <div class="tip-card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg>Handle Edge Cases Early</div>
+      <p>Address capacity=0 and put(existingKey) before the interviewer asks. "I'll handle the zero-capacity edge case here" and "put on an existing key counts as an access" show thoroughness.</p>
+    </div>
+  </div>
+</section>
+
+</div><!-- /content-wrapper -->
+</main>
+
+<!-- Search Overlay -->
+<div class="search-overlay" id="search-overlay" onclick="if(event.target===this)closeSearch()">
+  <div class="search-modal">
+    <div class="search-input-wrap">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input type="text" class="search-input" id="search-input" placeholder="Search documentation..." oninput="onSearch(this.value)">
+      <span class="search-kbd">ESC</span>
+    </div>
+    <div class="search-results" id="search-results">
+      <div class="search-empty">Type to search across all sections</div>
+    </div>
+  </div>
+</div>
+
+<!-- Back to Top -->
+<button class="back-to-top" id="back-to-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="18 15 12 9 6 15"/></svg>
+</button>
+
+<script>
+// Navigation data
+const navData = [
+  { id: 'introduction', label: 'Introduction', icon: 'home' },
+  { id: 'eviction-policies', label: 'Eviction Policies', icon: 'layers' },
+  { id: 'requirements', label: 'Requirements', icon: 'check', children: [
+    { id: 'functional-requirements', label: 'Functional Requirements' },
+    { id: 'non-functional-requirements', label: 'Non-Functional Requirements' }
+  ]},
+  { id: 'data-model', label: 'Data Model', icon: 'database', children: [
+    { id: 'lru-data-structures', label: 'LRU Data Structures' },
+    { id: 'why-dll', label: 'Why a Doubly Linked List?' },
+    { id: 'why-not-alternatives', label: 'Why Not Alternatives?' },
+    { id: 'lfu-data-structures', label: 'LFU Data Structures' },
+    { id: 'node-structure', label: 'Node Structure' }
+  ]},
+  { id: 'api-design', label: 'API Design', icon: 'code', children: [
+    { id: 'lru-api', label: 'LRU Cache API' },
+    { id: 'lfu-api', label: 'LFU Cache API' }
+  ]},
+  { id: 'high-level-design', label: 'High-Level Design', icon: 'layout', children: [
+    { id: 'lru-architecture', label: 'LRU Architecture' },
+    { id: 'lfu-architecture', label: 'LFU Architecture' },
+    { id: 'lru-operation-walkthrough', label: 'LRU Operation Walkthrough' },
+    { id: 'lfu-operation-walkthrough', label: 'LFU Operation Walkthrough' }
+  ]},
+  { id: 'deep-dive-lru', label: 'LRU Implementation', icon: 'book', children: [
+    { id: 'lru-java-impl', label: 'Java Implementation' },
+    { id: 'dll-operations-visual', label: 'DLL Operations Visual' },
+    { id: 'sentinel-explained', label: 'Sentinel Nodes' },
+    { id: 'lru-linkedhashmap', label: 'LinkedHashMap Shortcut' },
+    { id: 'lru-strengths-weaknesses', label: 'Strengths & Weaknesses' }
+  ]},
+  { id: 'deep-dive-lfu', label: 'LFU Implementation', icon: 'bar-chart', children: [
+    { id: 'lfu-java-impl', label: 'Java Implementation' },
+    { id: 'min-frequency-correctness', label: 'minFrequency Proof' },
+    { id: 'lfu-promotion-visual', label: 'Frequency Promotion Visual' },
+    { id: 'lfu-strengths-weaknesses', label: 'Strengths & Weaknesses' }
+  ]},
+  { id: 'deep-dive-comparison', label: 'LRU vs LFU', icon: 'git-compare', children: [
+    { id: 'feature-comparison', label: 'Feature Comparison' },
+    { id: 'workload-simulation', label: 'Workload Simulation' },
+    { id: 'when-to-use-which', label: 'When to Use Which' }
+  ]},
+  { id: 'deep-dive-concurrency', label: 'Thread Safety', icon: 'lock', children: [
+    { id: 'concurrent-lru', label: 'Thread-Safe LRU' },
+    { id: 'concurrency-strategies', label: 'Strategy Comparison' }
+  ]},
+  { id: 'deep-dive-ttl', label: 'TTL Integration', icon: 'clock', children: [
+    { id: 'ttl-approaches', label: 'TTL Approaches' }
+  ]},
+  { id: 'deep-dive-design', label: 'Design Decisions', icon: 'settings', children: [
+    { id: 'count-vs-size', label: 'Count vs Size Capacity' },
+    { id: 'hashmap-optimization', label: 'HashMap Optimization' }
+  ]},
+  { id: 'deep-dive-pitfalls', label: 'Common Pitfalls', icon: 'alert-triangle', children: [
+    { id: 'lru-pitfalls', label: 'LRU Pitfalls' },
+    { id: 'lfu-pitfalls', label: 'LFU Pitfalls' },
+    { id: 'general-pitfalls', label: 'General Pitfalls' }
+  ]},
+  { id: 'deep-dive-variants', label: 'Variants & Hybrids', icon: 'git-branch', children: [
+    { id: 'variant-lru-k', label: 'LRU-K' },
+    { id: 'variant-2q', label: '2Q (Two-Queue)' },
+    { id: 'variant-arc', label: 'ARC' },
+    { id: 'variant-wtinylfu', label: 'W-TinyLFU (Caffeine)' },
+    { id: 'variant-clock', label: 'CLOCK' },
+    { id: 'variant-summary', label: 'Variant Summary' }
+  ]},
+  { id: 'deep-dive-interview-questions', label: 'Interview Q&A', icon: 'help-circle', children: [
+    { id: 'hld-interview-questions', label: 'HLD Questions' },
+    { id: 'implementation-interview-questions', label: 'Implementation Questions' }
+  ]},
+  { id: 'interview-tips', label: 'Interview Tips', icon: 'star' }
+];
+
+const svgIcons = {
+  home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
+  layers: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>',
+  database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>',
+  code: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+  layout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  'bar-chart': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>',
+  'git-compare': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 3h5v5"/><path d="M8 3H3v5"/><path d="m21 3-8.5 8.5"/><path d="m3 3 8.5 8.5"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
+  settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+  'alert-triangle': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  'git-branch': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>',
+  'help-circle': '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>'
+};
+
+// Build navigation
+function buildNav() {
+  const body = document.getElementById('nav-body');
+  let html = '';
+  navData.forEach(item => {
+    if (item.children) {
+      html += `<button class="nav-group-header" data-target="${item.id}" onclick="toggleNavGroup(this)">
+        ${svgIcons[item.icon] ? `<span class="nav-icon">${svgIcons[item.icon]}</span>` : ''}
+        <span>${item.label}</span>
+        <span class="nav-badge">${item.children.length}</span>
+        <svg class="nav-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </button>
+      <div class="nav-subitems" data-parent="${item.id}">
+        ${item.children.map(c => `<a class="nav-subitem" href="#${c.id}" data-target="${c.id}" onclick="navClick(event,'${c.id}')">${c.label}</a>`).join('')}
+      </div>`;
+    } else {
+      html += `<a class="nav-item" href="#${item.id}" data-target="${item.id}" onclick="navClick(event,'${item.id}')">
+        ${svgIcons[item.icon] ? svgIcons[item.icon] : ''}
+        <span>${item.label}</span>
+      </a>`;
+    }
+  });
+  body.innerHTML = html;
+}
+
+function navClick(e, id) {
+  e.preventDefault();
+  const el = document.getElementById(id);
+  if (el) {
+    const y = el.getBoundingClientRect().top + window.pageYOffset - 80;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }
+}
+
+function toggleNavGroup(btn) {
+  const parent = btn.getAttribute('data-target');
+  const subitems = document.querySelector(`.nav-subitems[data-parent="${parent}"]`);
+  const chevron = btn.querySelector('.nav-chevron');
+  subitems.classList.toggle('open');
+  chevron.classList.toggle('open');
+}
+
+function toggleAllNav(expand) {
+  document.querySelectorAll('.nav-subitems').forEach(s => s.classList.toggle('open', expand));
+  document.querySelectorAll('.nav-chevron').forEach(c => c.classList.toggle('open', expand));
+}
+
+// Scroll tracking
+function onScroll() {
+  const scrollTop = window.pageYOffset;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = docHeight > 0 ? scrollTop / docHeight : 0;
+  document.getElementById('progress-bar').style.transform = `scaleX(${progress})`;
+
+  // Back to top
+  const btt = document.getElementById('back-to-top');
+  btt.style.display = scrollTop > 400 ? 'flex' : 'none';
+
+  // Active nav tracking
+  let activeId = null;
+  const allIds = [];
+  navData.forEach(item => {
+    allIds.push(item.id);
+    if (item.children) item.children.forEach(c => allIds.push(c.id));
+  });
+  for (let i = allIds.length - 1; i >= 0; i--) {
+    const el = document.getElementById(allIds[i]);
+    if (el && el.getBoundingClientRect().top <= 120) {
+      activeId = allIds[i];
+      break;
+    }
+  }
+  if (activeId) updateActiveNav(activeId);
+}
+
+function updateActiveNav(activeId) {
+  document.querySelectorAll('.nav-item, .nav-group-header, .nav-subitem').forEach(el => el.classList.remove('active'));
+  const target = document.querySelector(`[data-target="${activeId}"]`);
+  if (target) {
+    target.classList.add('active');
+    // Auto-expand parent group
+    const parentSub = target.closest('.nav-subitems');
+    if (parentSub) {
+      parentSub.classList.add('open');
+      const parentId = parentSub.getAttribute('data-parent');
+      const header = document.querySelector(`.nav-group-header[data-target="${parentId}"]`);
+      if (header) {
+        header.classList.add('active');
+        header.querySelector('.nav-chevron')?.classList.add('open');
+      }
+    }
+    // Also highlight parent group header for children
+    navData.forEach(item => {
+      if (item.children && item.children.some(c => c.id === activeId)) {
+        const header = document.querySelector(`.nav-group-header[data-target="${item.id}"]`);
+        if (header) header.classList.add('active');
+      }
+      if (item.id === activeId && !item.children) {
+        // direct nav item
+      }
+    });
+    // Scroll nav item into view
+    target.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+window.addEventListener('scroll', onScroll, { passive: true });
+
+// Dark mode
+function getPreferredTheme() {
+  const stored = localStorage.getItem('theme');
+  if (stored) return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('theme', theme);
+  const btn = document.getElementById('theme-toggle');
+  btn.innerHTML = theme === 'dark'
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+}
+function toggleTheme() {
+  const current = document.documentElement.getAttribute('data-theme');
+  applyTheme(current === 'dark' ? 'light' : 'dark');
+}
+applyTheme(getPreferredTheme());
+
+// Copy code
+function copyCode(btn) {
+  const code = btn.closest('.code-block').querySelector('pre').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    btn.classList.add('copied');
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+    setTimeout(() => {
+      btn.classList.remove('copied');
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    }, 2000);
+  });
+}
+
+// Search
+function openSearch() {
+  document.getElementById('search-overlay').classList.add('open');
+  document.getElementById('search-input').focus();
+}
+function closeSearch() {
+  document.getElementById('search-overlay').classList.remove('open');
+  document.getElementById('search-input').value = '';
+}
+
+let searchActiveIdx = -1;
+function onSearch(query) {
+  const results = document.getElementById('search-results');
+  if (!query || query.length < 2) {
+    results.innerHTML = '<div class="search-empty">Type to search across all sections</div>';
+    searchActiveIdx = -1;
+    return;
+  }
+  const q = query.toLowerCase();
+  const sections = document.querySelectorAll('section');
+  const matches = [];
+  sections.forEach(sec => {
+    const text = sec.textContent;
+    const idx = text.toLowerCase().indexOf(q);
+    if (idx === -1) return;
+    const h = sec.querySelector('h2, h3');
+    const title = h ? h.textContent.trim() : sec.id;
+    const start = Math.max(0, idx - 40);
+    const end = Math.min(text.length, idx + query.length + 60);
+    let snippet = (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '');
+    snippet = snippet.replace(new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'), '<mark>$1</mark>');
+    matches.push({ id: sec.id, title, snippet });
+  });
+  if (matches.length === 0) {
+    results.innerHTML = '<div class="search-empty">No results found</div>';
+    searchActiveIdx = -1;
+    return;
+  }
+  results.innerHTML = matches.slice(0, 10).map((m, i) =>
+    `<div class="search-result ${i === 0 ? 'active' : ''}" onclick="goToResult('${m.id}')">
+      <div class="search-result-section">${m.title}</div>
+      <div class="search-result-text">${m.snippet}</div>
+    </div>`
+  ).join('');
+  searchActiveIdx = 0;
+}
+
+function goToResult(id) {
+  closeSearch();
+  const el = document.getElementById(id);
+  if (el) {
+    const y = el.getBoundingClientRect().top + window.pageYOffset - 80;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }
+}
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault();
+    openSearch();
+  }
+  if (e.key === 'Escape') closeSearch();
+  if (document.getElementById('search-overlay').classList.contains('open')) {
+    const items = document.querySelectorAll('.search-result');
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      searchActiveIdx = Math.min(searchActiveIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('active', i === searchActiveIdx));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      searchActiveIdx = Math.max(searchActiveIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('active', i === searchActiveIdx));
+    } else if (e.key === 'Enter' && searchActiveIdx >= 0 && items[searchActiveIdx]) {
+      items[searchActiveIdx].click();
+    }
+  }
+});
+
+// Init
+buildNav();
+onScroll();
+</script>
+</body>
+</html>
