@@ -5,7 +5,6 @@ import com.example.redis.dto.CacheStateResponse;
 import com.example.redis.dto.CachingPatternStateResponse;
 import com.example.redis.service.CachingPatternService;
 import com.github.benmanes.caffeine.cache.Cache;
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -19,8 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
+import org.springframework.scheduling.annotation.Scheduled;
 
 /**
  * <pre>
@@ -70,57 +68,29 @@ public class WriteBackCacheService implements CachingPatternService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final DatabaseService database;
-    private final ExecutorService executor;
     private final long flushIntervalSeconds;
-    private final Cache<String, String> l1Cache;
+    private final Cache<String, String> caffeineL1Cache;
 
-    public WriteBackCacheService(
-            RedisTemplate<String, String> redisTemplate,
-            DatabaseService database,
-            @Qualifier("cachingPatternExecutor") ExecutorService executor,
-            @Value("${app.caching.write-back.flush-interval-seconds:10}") long flushIntervalSeconds,
-            @Qualifier("caffeineL1Cache") Cache<String, String> l1Cache) {
+    public WriteBackCacheService(RedisTemplate<String, String> redisTemplate,
+                                DatabaseService database,
+                                @Value("${app.caching.write-back.flush-interval-seconds:10}") long flushIntervalSeconds,
+                                @Qualifier("caffeineL1Cache") Cache<String, String> caffeineL1Cache) {
         this.redisTemplate = redisTemplate;
         this.database = database;
-        this.executor = executor;
         this.flushIntervalSeconds = flushIntervalSeconds;
-        this.l1Cache = l1Cache;
+        this.caffeineL1Cache = caffeineL1Cache;
     }
 
     /**
-     * <pre>
-     * +------------------------------------------------------------+
-     * |  Start Background Flush                                    |
-     * +------------------------------------------------------------+
-     * |  Launches a daemon loop that calls {@link #flush()} every  |
-     * |  N seconds (configurable via                               |
-     * |  {@code app.caching.write-back.flush-interval-seconds}).   |
-     * +------------------------------------------------------------+
-     * </pre>
+     * <b>Scheduled Background Flush</b>
      *
-     * <p>Background loop:
-     * <pre>
-     *  +--------+  sleep(N)  +-------+  flush()  +------------+
-     *  | Worker |-----------&gt;| Wake  |----------&gt;| DirtySet   |
-     *  +--------+            +-------+           | ---&gt; DB    |
-     *       ^                                    +-----+------+
-     *       +---------------- loop ----------------------+
-     * </pre>
+     * <p>Spring {@code @Scheduled} triggers this at a fixed interval configured
+     * via {@code app.caching.write-back.flush-interval-seconds}. Spring manages
+     * the thread lifecycle automatically — no manual executor needed.
      */
-    @PostConstruct
-    public void startBackgroundFlush() {
-        executor.submit(() -> {
-            while (!Thread.currentThread().isInterrupted()) {
-                try {
-                    TimeUnit.SECONDS.sleep(flushIntervalSeconds);
-                    flush();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        });
-        log.info("WRITE-BACK: background flush started (interval={}s)", flushIntervalSeconds);
+    @Scheduled(fixedDelayString = "${app.caching.write-back.flush-interval-seconds:10}000")
+    public void scheduledFlush() {
+        flush();
     }
 
     /**
@@ -153,7 +123,7 @@ public class WriteBackCacheService implements CachingPatternService {
     @Override
     public void put(String key, String value) {
         redisTemplate.opsForHash().put(L2_KEY, key, value);
-        l1Cache.put(PATTERN + ":" + key, value);
+        caffeineL1Cache.put(PATTERN + ":" + key, value);
         redisTemplate.opsForSet().add(DIRTY_KEY, key);
         incrementMeta("writes");
         log.info("WRITE-BACK write: L1+L2 cached + marked dirty key={}", key);
@@ -189,7 +159,7 @@ public class WriteBackCacheService implements CachingPatternService {
     public String get(String key) {
         String l1Key = PATTERN + ":" + key;
 
-        String l1Value = l1Cache.getIfPresent(l1Key);
+        String l1Value = caffeineL1Cache.getIfPresent(l1Key);
         if (l1Value != null) {
             incrementMeta("l1-hits");
             log.info("WRITE-BACK read: L1 HIT key={}", key);
@@ -199,7 +169,7 @@ public class WriteBackCacheService implements CachingPatternService {
         Object l2Value = redisTemplate.opsForHash().get(L2_KEY, key);
         if (l2Value != null) {
             incrementMeta("l2-hits");
-            l1Cache.put(l1Key, l2Value.toString());
+            caffeineL1Cache.put(l1Key, l2Value.toString());
             log.info("WRITE-BACK read: L2 HIT key={}, promoted to L1", key);
             return l2Value.toString();
         }
@@ -208,7 +178,7 @@ public class WriteBackCacheService implements CachingPatternService {
         String dbValue = database.read(PATTERN, key);
         if (dbValue != null) {
             redisTemplate.opsForHash().put(L2_KEY, key, dbValue);
-            l1Cache.put(l1Key, dbValue);
+            caffeineL1Cache.put(l1Key, dbValue);
             log.info("WRITE-BACK read: DB fetch key={}, cached in L1+L2", key);
         }
         return dbValue;
@@ -322,8 +292,8 @@ public class WriteBackCacheService implements CachingPatternService {
         meta.forEach((k, v) -> metaMap.put(k.toString(), v));
         metaMap.put("dirtyKeys", dirtyKeys);
         metaMap.put("flushIntervalSeconds", flushIntervalSeconds);
-        metaMap.put("l1-estimated-size", l1Cache.estimatedSize());
-        metaMap.put("l1-stats", l1Cache.stats().toString());
+        metaMap.put("l1-estimated-size", caffeineL1Cache.estimatedSize());
+        metaMap.put("l1-stats", caffeineL1Cache.stats().toString());
 
         return CachingPatternStateResponse.builder()
                 .pattern("Write-Back (Write-Behind)")
@@ -352,7 +322,7 @@ public class WriteBackCacheService implements CachingPatternService {
         redisTemplate.delete(L2_KEY);
         redisTemplate.delete(DIRTY_KEY);
         redisTemplate.delete(META_KEY);
-        l1Cache.invalidateAll();
+        caffeineL1Cache.invalidateAll();
     }
 
     /**

@@ -65,14 +65,14 @@ public class CacheAsideCacheService implements CachingPatternService {
 
     private final RedisTemplate<String, String> redisTemplate;
     private final DatabaseService database;
-    private final Cache<String, String> l1Cache;
+    private final Cache<String, String> caffeineL1Cache;
 
     public CacheAsideCacheService(RedisTemplate<String, String> redisTemplate,
                                   DatabaseService database,
-                                  @Qualifier("caffeineL1Cache") Cache<String, String> l1Cache) {
+                                  @Qualifier("caffeineL1Cache") Cache<String, String> caffeineL1Cache) {
         this.redisTemplate = redisTemplate;
         this.database = database;
-        this.l1Cache = l1Cache;
+        this.caffeineL1Cache = caffeineL1Cache;
     }
 
     /**
@@ -109,7 +109,7 @@ public class CacheAsideCacheService implements CachingPatternService {
     public void put(String key, String value) {
         database.write(PATTERN, key, value);
         redisTemplate.opsForHash().delete(L2_KEY, key);
-        l1Cache.invalidate(PATTERN + ":" + key);
+        caffeineL1Cache.invalidate(PATTERN + ":" + key);
         log.info("CACHE-ASIDE write: DB updated, L1+L2 invalidated key={}", key);
     }
 
@@ -143,7 +143,7 @@ public class CacheAsideCacheService implements CachingPatternService {
     public String get(String key) {
         String l1Key = PATTERN + ":" + key;
 
-        String l1Value = l1Cache.getIfPresent(l1Key);
+        String l1Value = caffeineL1Cache.getIfPresent(l1Key);
         if (l1Value != null) {
             incrementMeta("l1-hits");
             log.info("CACHE-ASIDE read: L1 HIT key={}", key);
@@ -153,7 +153,7 @@ public class CacheAsideCacheService implements CachingPatternService {
         Object l2Value = redisTemplate.opsForHash().get(L2_KEY, key);
         if (l2Value != null) {
             incrementMeta("l2-hits");
-            l1Cache.put(l1Key, l2Value.toString());
+            caffeineL1Cache.put(l1Key, l2Value.toString());
             log.info("CACHE-ASIDE read: L2 HIT key={}, promoted to L1", key);
             return l2Value.toString();
         }
@@ -162,7 +162,7 @@ public class CacheAsideCacheService implements CachingPatternService {
         String dbValue = database.read(PATTERN, key);
         if (dbValue != null) {
             redisTemplate.opsForHash().put(L2_KEY, key, dbValue);
-            l1Cache.put(l1Key, dbValue);
+            caffeineL1Cache.put(l1Key, dbValue);
             log.info("CACHE-ASIDE read: DB fetch key={}, cached in L1+L2", key);
         }
         return dbValue;
@@ -207,8 +207,8 @@ public class CacheAsideCacheService implements CachingPatternService {
 
         Map<String, Object> metaMap = new HashMap<>();
         meta.forEach((k, v) -> metaMap.put(k.toString(), v));
-        metaMap.put("l1-estimated-size", l1Cache.estimatedSize());
-        metaMap.put("l1-stats", l1Cache.stats().toString());
+        metaMap.put("l1-estimated-size", caffeineL1Cache.estimatedSize());
+        metaMap.put("l1-stats", caffeineL1Cache.stats().toString());
 
         return CachingPatternStateResponse.builder()
                 .pattern("Cache-Aside (Lazy Loading)")
@@ -232,7 +232,7 @@ public class CacheAsideCacheService implements CachingPatternService {
     public void clear() {
         redisTemplate.delete(L2_KEY);
         redisTemplate.delete(META_KEY);
-        l1Cache.invalidateAll();
+        caffeineL1Cache.invalidateAll();
     }
 
     /**

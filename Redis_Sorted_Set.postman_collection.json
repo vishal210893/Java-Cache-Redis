@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "Redis Sorted Set Learning",
-    "description": "Spring Boot REST API for learning Redis Sorted Set operations via Leaderboard, LRU Cache, and LFU Cache.",
+    "name": "Redis Caching Project",
+    "description": "Spring Boot REST API for learning Redis Sorted Set operations, LRU/LFU caches, and six caching patterns with 3-tier caching (Caffeine L1 + Redis L2 + PostgreSQL DB).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -596,6 +596,726 @@
               "path": ["api", "cache", "lfu", "state"]
             },
             "description": "Shows all entries sorted by frequency. First entry = next eviction candidate."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Cache-Aside",
+      "description": "Cache-Aside (Lazy Loading): Write to DB first, invalidate cache. Read checks L1->L2->DB with lazy population.",
+      "item": [
+        {
+          "name": "4.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "4.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data. Cache is NOT populated."
+          }
+        },
+        {
+          "name": "4.3 Read laptop (MISS - loads from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "entries", "laptop"]
+            },
+            "description": "Cache MISS -> loads from DB -> populates L1+L2 cache"
+          }
+        },
+        {
+          "name": "4.4 Read laptop again (HIT from L1)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "entries", "laptop"]
+            },
+            "description": "Cache HIT from L1 (Caffeine) - no DB access needed"
+          }
+        },
+        {
+          "name": "4.5 Write entry (DB + invalidate cache)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"laptop\",\n  \"value\": \"MacBook Pro M4 Max\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "entries"]
+            },
+            "description": "Write to DB first, then invalidate L1+L2 cache"
+          }
+        },
+        {
+          "name": "4.6 Read after write (MISS - new value from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "entries", "laptop"]
+            },
+            "description": "Cache was invalidated by write -> MISS -> loads new value from DB"
+          }
+        },
+        {
+          "name": "4.7 View state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "state"]
+            },
+            "description": "Full state: L1 entries, L2 entries, DB entries, metadata, architecture diagram"
+          }
+        },
+        {
+          "name": "4.8 View DB state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/cache-aside/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "cache-aside", "db", "state"]
+            },
+            "description": "View raw PostgreSQL contents for cache-aside pattern"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Read-Through",
+      "description": "Read-Through: Caffeine LoadingCache auto-fetches on miss with stampede protection. Write invalidates cache.",
+      "item": [
+        {
+          "name": "5.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "5.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data. Cache is NOT populated."
+          }
+        },
+        {
+          "name": "5.3 Read laptop (LoadingCache fetches from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "entries", "laptop"]
+            },
+            "description": "LoadingCache miss -> loader fetches from L2 -> DB -> populates all layers"
+          }
+        },
+        {
+          "name": "5.4 Read laptop again (L1 HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "entries", "laptop"]
+            },
+            "description": "HIT from L1 LoadingCache - no DB access"
+          }
+        },
+        {
+          "name": "5.5 Write entry (DB + invalidate cache)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"laptop\",\n  \"value\": \"MacBook Pro M4 Max\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "entries"]
+            },
+            "description": "Write to DB, invalidate L1+L2 cache"
+          }
+        },
+        {
+          "name": "5.6 Read after write (loader re-fetches)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "entries", "laptop"]
+            },
+            "description": "LoadingCache re-fetches new value from DB"
+          }
+        },
+        {
+          "name": "5.7 View state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "state"]
+            },
+            "description": "Full state: L1 entries, L2 entries, DB entries, metadata, architecture diagram"
+          }
+        },
+        {
+          "name": "5.8 View DB state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/read-through/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "read-through", "db", "state"]
+            },
+            "description": "View raw PostgreSQL contents for read-through pattern"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Write-Through",
+      "description": "Write-Through: Write to DB(sync)->L2(Redis)->L1(Caffeine) before confirming. Cache always in sync.",
+      "item": [
+        {
+          "name": "6.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "6.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data."
+          }
+        },
+        {
+          "name": "6.3 Read laptop (MISS - loads from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "entries", "laptop"]
+            },
+            "description": "Cache MISS -> loads from DB -> populates cache"
+          }
+        },
+        {
+          "name": "6.4 Read laptop again (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "entries", "laptop"]
+            },
+            "description": "HIT from L1 (Caffeine)"
+          }
+        },
+        {
+          "name": "6.5 Write entry (DB->L2->L1 sync)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"laptop\",\n  \"value\": \"MacBook Pro M4 Max\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "entries"]
+            },
+            "description": "Sync write: DB -> L2 (Redis) -> L1 (Caffeine) -> confirm"
+          }
+        },
+        {
+          "name": "6.6 Read after write (immediate HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "entries", "laptop"]
+            },
+            "description": "Immediate L1 HIT - write-through populated all layers"
+          }
+        },
+        {
+          "name": "6.7 View state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "state"]
+            },
+            "description": "Full state: all layers populated after write-through"
+          }
+        },
+        {
+          "name": "6.8 View DB state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-through/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-through", "db", "state"]
+            },
+            "description": "View raw PostgreSQL contents for write-through pattern"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Write-Back",
+      "description": "Write-Back (Write-Behind): Write to L1+L2 only (~1ms), mark dirty, flush to DB later. Fastest writes.",
+      "item": [
+        {
+          "name": "7.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "7.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data."
+          }
+        },
+        {
+          "name": "7.3 Read laptop (MISS - loads from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "entries", "laptop"]
+            },
+            "description": "Cache MISS -> loads from DB -> populates cache"
+          }
+        },
+        {
+          "name": "7.4 Read laptop again (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "entries", "laptop"]
+            },
+            "description": "HIT from L1 (Caffeine)"
+          }
+        },
+        {
+          "name": "7.5 Write entry (L1+L2 only, ~1ms)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"keyboard\",\n  \"value\": \"Magic Keyboard\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "entries"]
+            },
+            "description": "Write to L1+L2 only. Key marked dirty. DB NOT updated yet."
+          }
+        },
+        {
+          "name": "7.6 Read after write (HIT from cache)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/entries/keyboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "entries", "keyboard"]
+            },
+            "description": "HIT from cache - data is in L1+L2 but NOT in DB yet"
+          }
+        },
+        {
+          "name": "7.7 View DB state (keyboard NOT in DB yet)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "db", "state"]
+            },
+            "description": "keyboard is NOT in DB yet - only in cache (dirty)"
+          }
+        },
+        {
+          "name": "7.8 Flush dirty keys to DB",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/flush",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "flush"]
+            },
+            "description": "Flush all dirty keys from cache to PostgreSQL"
+          }
+        },
+        {
+          "name": "7.9 View DB state (keyboard now in DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "db", "state"]
+            },
+            "description": "keyboard is now in DB after flush"
+          }
+        },
+        {
+          "name": "7.10 View state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-back/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-back", "state"]
+            },
+            "description": "Full state: dirty set should be empty after flush"
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Write-Around",
+      "description": "Write-Around: Write directly to DB, bypass cache. Cache populated only on read (lazy load).",
+      "item": [
+        {
+          "name": "8.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "8.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data."
+          }
+        },
+        {
+          "name": "8.3 Read laptop (MISS - loads from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "entries", "laptop"]
+            },
+            "description": "Cache MISS -> loads from DB -> populates L1+L2 cache"
+          }
+        },
+        {
+          "name": "8.4 Read laptop again (HIT from L1)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "entries", "laptop"]
+            },
+            "description": "HIT from L1 (Caffeine)"
+          }
+        },
+        {
+          "name": "8.5 Write entry (DB only, cache invalidated)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"laptop\",\n  \"value\": \"MacBook Pro M4 Max\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "entries"]
+            },
+            "description": "Write to DB only. L1+L2 cache invalidated (not populated)."
+          }
+        },
+        {
+          "name": "8.6 Read after write (MISS - loads new value from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "entries", "laptop"]
+            },
+            "description": "MISS -> loads new value from DB -> populates cache"
+          }
+        },
+        {
+          "name": "8.7 View state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "state"]
+            },
+            "description": "Full state: cache populated by reads, not writes"
+          }
+        },
+        {
+          "name": "8.8 View DB state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/write-around/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "write-around", "db", "state"]
+            },
+            "description": "View raw PostgreSQL contents for write-around pattern"
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Refresh-Ahead",
+      "description": "Refresh-Ahead: TTL-based Caffeine LoadingCache with async background refresh in last 20% of TTL window.",
+      "item": [
+        {
+          "name": "9.1 Clear cache",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead"]
+            },
+            "description": "Clear L1+L2 cache. DB data preserved."
+          }
+        },
+        {
+          "name": "9.2 Seed DB with test data",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entries\": {\n    \"laptop\": \"MacBook Pro M4\",\n    \"phone\": \"iPhone 16 Pro\",\n    \"tablet\": \"iPad Air M2\",\n    \"watch\": \"Apple Watch Ultra\",\n    \"headphones\": \"AirPods Max\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/db/seed",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "db", "seed"]
+            },
+            "description": "Seed PostgreSQL with test data."
+          }
+        },
+        {
+          "name": "9.3 Read laptop (MISS - loads from DB)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "entries", "laptop"]
+            },
+            "description": "Cache MISS -> loads from DB -> populates cache with TTL"
+          }
+        },
+        {
+          "name": "9.4 Read laptop again (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "entries", "laptop"]
+            },
+            "description": "HIT from L1. If in last 20% of TTL, async refresh triggered."
+          }
+        },
+        {
+          "name": "9.5 Write entry (DB + L2 + L1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"key\": \"laptop\",\n  \"value\": \"MacBook Pro M4 Max\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/entries",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "entries"]
+            },
+            "description": "Write to DB + L2 + L1 (Caffeine LoadingCache)"
+          }
+        },
+        {
+          "name": "9.6 Read after write (HIT)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/entries/laptop",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "entries", "laptop"]
+            },
+            "description": "HIT - all layers populated by write"
+          }
+        },
+        {
+          "name": "9.7 View state (check TTL info)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "state"]
+            },
+            "description": "Full state: cache entries with TTL info, refresh metadata"
+          }
+        },
+        {
+          "name": "9.8 View DB state",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/cache/patterns/refresh-ahead/db/state",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "cache", "patterns", "refresh-ahead", "db", "state"]
+            },
+            "description": "View raw PostgreSQL contents for refresh-ahead pattern"
           }
         }
       ]

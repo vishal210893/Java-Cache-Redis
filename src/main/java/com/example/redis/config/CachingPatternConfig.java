@@ -2,6 +2,9 @@ package com.example.redis.config;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,6 +27,7 @@ import java.util.concurrent.TimeUnit;
  *                  in-process cache        remote cache       database
  * </pre>
  */
+@Slf4j
 @Configuration
 public class CachingPatternConfig {
 
@@ -55,11 +59,15 @@ public class CachingPatternConfig {
     @Bean("caffeineL1Cache")
     public Cache<String, String> caffeineL1Cache(
             @Value("${app.caching.caffeine.max-size:100}") long maxSize,
-            @Value("${app.caching.caffeine.expire-after-write-seconds:300}") long expireSeconds) {
+            @Value("${app.caching.caffeine.expire-after-write-seconds:300}") long expireSeconds,
+            @Qualifier("cachingPatternExecutor") ExecutorService executor) {
         return Caffeine.newBuilder()
                 .maximumSize(maxSize)
                 .expireAfterWrite(expireSeconds, TimeUnit.SECONDS)
+                .executor(executor)
                 .recordStats()
+                .removalListener((String key, String value, RemovalCause cause) ->
+                        log.debug("L1 evicted: key={} cause={}", key, cause))
                 .build();
     }
 }

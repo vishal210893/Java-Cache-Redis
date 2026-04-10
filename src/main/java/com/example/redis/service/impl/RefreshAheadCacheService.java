@@ -4,7 +4,9 @@ import com.example.redis.dto.CacheEntry;
 import com.example.redis.dto.CacheStateResponse;
 import com.example.redis.dto.CachingPatternStateResponse;
 import com.example.redis.service.CachingPatternService;
-import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.LoadingCache;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,64 +18,35 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
- * <pre>
- * +------------------------------------------------------------+
- * |  Refresh-Ahead Cache Service                               |
- * +------------------------------------------------------------+
- * |  Proactive refresh pattern that keeps hot keys fresh by    |
- * |  triggering an asynchronous background reload when a       |
- * |  cached entry enters its "refresh zone" (last N% of TTL). |
- * |  The stale value is returned immediately while the         |
- * |  refresh happens in the background -- hot keys never       |
- * |  experience miss latency.                                  |
- * +------------------------------------------------------------+
- * </pre>
+ * <b>Refresh-Ahead Cache Service</b>
  *
- * <p>Read flow with refresh-zone check:
- * <pre>
- *  +---------+  GET   +-------------+  MISS  +------------+
- *  |   App   |-------&gt;| L1 Caffeine |-------&gt;| L2 Redis   |
- *  +---------+        +------+------+        +------+-----+
- *       ^              HIT   |                      |
- *       +---- return -------+             +---------+---------+
- *       |                                 | age &lt; 80% TTL    |
- *       |                                 | ---&gt; return       |
- *       |                                 |                   |
- *       |                                 | age &gt;= 80% TTL   |
- *       |                                 | ---&gt; return +     |
- *       |                                 |   async refresh   |
- *       |                                 |                   |
- *       |                                 | MISS (expired)    |
- *       |                                 | ---&gt; DB load      |
- *       |                                 +-------------------+
- *       |
- *       +--- populate L1 + L2 + TTL timestamp
- * </pre>
+ * <p>Uses Caffeine's {@link LoadingCache} with {@code refreshAfterWrite()} to automatically
+ * trigger async background reloads when entries become stale. This replaces manual TTL tracking
+ * -- Caffeine handles the refresh zone, deduplication, and async execution natively.
  *
- * <p>Async refresh flow:
+ * <p>Read flow:
  * <pre>
- *  +----------+  submit  +----------+  SELECT  +------------+
- *  | Executor |&lt;---------|  Trigger |&lt;---------| PostgreSQL |
- *  +----------+          +----------+          +------+-----+
- *                                                     |
- *                                               +-----v------+
- *                                               | L2 + L1 +  |
- *                                               | TTL update  |
- *                                               +-------------+
+ *  +---------+  GET   +---------------------------+  MISS/REFRESH  +----------+
+ *  |   App   |-------&gt;| Caffeine LoadingCache     |---------------&gt;| L2 Redis |
+ *  +---------+        | (auto-refresh after 80%   |                +----+-----+
+ *       ^             |  of expiry window)         |                MISS |
+ *       |             +---------------------------+               +-----v------+
+ *       +---- return (stale value during refresh)                 | PostgreSQL |
+ *                                                                 +------------+
  * </pre>
  *
  * @see CachingPatternService
+ * @see LoadingCache
  */
 @Slf4j
 @Service("refreshAheadService")
 public class RefreshAheadCacheService implements CachingPatternService {
 
     private static final String L2_KEY = "pattern:refresh-ahead:cache";
-    private static final String TTL_KEY = "pattern:refresh-ahead:ttl";
     private static final String META_KEY = "pattern:refresh-ahead:meta";
     private static final String PATTERN = "refresh-ahead";
 
@@ -82,223 +55,114 @@ public class RefreshAheadCacheService implements CachingPatternService {
     private final ExecutorService executor;
     private final long ttlSeconds;
     private final int thresholdPercent;
-    private final Cache<String, String> l1Cache;
-    private final ConcurrentHashMap<String, Boolean> refreshInFlight = new ConcurrentHashMap<>();
+    private LoadingCache<String, String> caffeineL1Cache;
 
     public RefreshAheadCacheService(
             RedisTemplate<String, String> redisTemplate,
             DatabaseService database,
             @Qualifier("cachingPatternExecutor") ExecutorService executor,
             @Value("${app.caching.refresh-ahead.ttl-seconds:60}") long ttlSeconds,
-            @Value("${app.caching.refresh-ahead.threshold-percent:80}") int thresholdPercent,
-            @Qualifier("caffeineL1Cache") Cache<String, String> l1Cache) {
+            @Value("${app.caching.refresh-ahead.threshold-percent:80}") int thresholdPercent) {
         this.redisTemplate = redisTemplate;
         this.database = database;
         this.executor = executor;
         this.ttlSeconds = ttlSeconds;
         this.thresholdPercent = thresholdPercent;
-        this.l1Cache = l1Cache;
     }
 
     /**
-     * <pre>
-     * +------------------------------------------------------------+
-     * |  Refresh-Ahead WRITE                                       |
-     * +------------------------------------------------------------+
-     * |  Updates DB, L2 (Redis), L1 (Caffeine), and records the   |
-     * |  write timestamp so that reads can calculate the entry's   |
-     * |  age relative to the configured TTL.                       |
-     * +------------------------------------------------------------+
-     * </pre>
+     * <b>Initialize Caffeine LoadingCache with refresh-after-write</b>
      *
-     * <p>Write flow:
-     * <pre>
-     *  +---------+  INSERT  +------------+
-     *  |   App   |---------&gt;| PostgreSQL |
-     *  +---------+          +------+-----+
-     *       |                      | OK
-     *       +---&gt; SET L2 key       |
-     *       +---&gt; put L1 key       |
-     *       +---&gt; HSET TTL timestamp
-     * </pre>
+     * <p>Configures Caffeine with:
+     * <ul>
+     *   <li>{@code expireAfterWrite} = full TTL (hard expiry)</li>
+     *   <li>{@code refreshAfterWrite} = TTL * threshold% (async refresh zone)</li>
+     *   <li>Custom async executor for background reloads</li>
+     *   <li>Loader: checks L2 (Redis) first, falls back to DB</li>
+     * </ul>
+     */
+    @PostConstruct
+    public void initCache() {
+        long refreshSeconds = ttlSeconds * thresholdPercent / 100;
+        this.caffeineL1Cache = Caffeine.newBuilder()
+                .maximumSize(100)
+                .expireAfterWrite(ttlSeconds, TimeUnit.SECONDS)
+                .refreshAfterWrite(refreshSeconds, TimeUnit.SECONDS)
+                .executor(executor)
+                .recordStats()
+                .build(this::loadForCaffeine);
+        log.info("REFRESH-AHEAD: Caffeine LoadingCache initialized "
+                + "(expire={}s, refresh={}s)", ttlSeconds, refreshSeconds);
+    }
+
+    /**
+     * <b>Caffeine CacheLoader</b>
      *
-     * @param key   cache key to write
-     * @param value value to persist across all tiers
+     * <p>Called by Caffeine on miss or refresh. Checks L2 (Redis) first,
+     * then falls back to PostgreSQL. On refresh, this runs async on the
+     * executor thread — the caller gets the stale value immediately.
+     */
+    private String loadForCaffeine(String l1Key) {
+        String key = l1Key.startsWith(PATTERN + ":") ? l1Key.substring(PATTERN.length() + 1) : l1Key;
+        Object l2Value = redisTemplate.opsForHash().get(L2_KEY, key);
+        if (l2Value != null) {
+            incrementMeta("l2-hits");
+            log.info("REFRESH-AHEAD loader: L2 HIT key={}", key);
+            return l2Value.toString();
+        }
+        incrementMeta("db-loads");
+        String dbValue = database.read(PATTERN, key);
+        if (dbValue != null) {
+            redisTemplate.opsForHash().put(L2_KEY, key, dbValue);
+            log.info("REFRESH-AHEAD loader: DB fetch key={}, cached in L2", key);
+        } else {
+            log.info("REFRESH-AHEAD loader: DB MISS key={}", key);
+        }
+        return dbValue;
+    }
+
+    /**
+     * <b>Refresh-Ahead WRITE</b>
+     *
+     * <p>Persists to DB, updates L2 (Redis), and puts into Caffeine LoadingCache.
+     *
+     * @param key   cache key
+     * @param value value to persist
      */
     @Override
     public void put(String key, String value) {
         database.write(PATTERN, key, value);
         redisTemplate.opsForHash().put(L2_KEY, key, value);
-        l1Cache.put(PATTERN + ":" + key, value);
-        redisTemplate.opsForHash().put(TTL_KEY, key, String.valueOf(System.currentTimeMillis()));
-        log.info("REFRESH-AHEAD write: DB+L2+L1 updated, TTL recorded for key={}", key);
+        caffeineL1Cache.put(PATTERN + ":" + key, value);
+        log.info("REFRESH-AHEAD write: DB+L2+L1 updated for key={}", key);
     }
 
     /**
-     * <pre>
-     * +------------------------------------------------------------+
-     * |  Refresh-Ahead READ                                        |
-     * +------------------------------------------------------------+
-     * |  Checks L1 first (no TTL check -- short-lived), then L2.  |
-     * |  On L2 hit, evaluates the entry age against the TTL:       |
-     * |   - age &lt; threshold: normal return + promote to L1         |
-     * |   - age &gt;= threshold and &lt; TTL: return + async refresh    |
-     * |   - age &gt;= TTL: evict, fall through to DB load            |
-     * +------------------------------------------------------------+
-     * </pre>
+     * <b>Refresh-Ahead READ</b>
      *
-     * <p>Read flow:
-     * <pre>
-     *  +---------+  GET   +-------------+
-     *  |   App   |-------&gt;| L1 Caffeine |
-     *  +---------+        +------+------+
-     *       ^              HIT   |  MISS
-     *       +---- return -------+   |
-     *       |                 +-----v------+
-     *       |                 | L2 Redis   |
-     *       |                 +--+----+----+
-     *       |             HIT    |    | MISS
-     *       |          +---------+    +--------+
-     *       |          | check age             |
-     *       |          +-----+-----+     +-----v------+
-     *       |    fresh |     | old |     | PostgreSQL  |
-     *       |   +------+  +--+----+-+   +------+------+
-     *       |   |return|  |return + |          |
-     *       |   +------+  |async   |   populate L1+L2+TTL
-     *       |             |refresh |
-     *       |             +--------+
-     *       +--- promote to L1
-     * </pre>
+     * <p>Delegates to Caffeine's {@code get()} which handles:
+     * <ul>
+     *   <li>L1 HIT (fresh): returns immediately</li>
+     *   <li>L1 HIT (stale, past refreshAfterWrite): returns stale + async reload via loader</li>
+     *   <li>L1 MISS: synchronous load via loader (L2 -> DB)</li>
+     * </ul>
      *
-     * @param key cache key to look up
-     * @return the value (possibly stale during refresh), or {@code null} if not found
+     * @param key cache key
+     * @return value from cache or DB, {@code null} if not found anywhere
      */
     @Override
     public String get(String key) {
         String l1Key = PATTERN + ":" + key;
-
-        String l1Value = l1Cache.getIfPresent(l1Key);
-        if (l1Value != null) {
-            incrementMeta("l1-hits");
-            log.info("REFRESH-AHEAD read: L1 HIT key={}", key);
-            return l1Value;
-        }
-
-        Object l2Value = redisTemplate.opsForHash().get(L2_KEY, key);
-        if (l2Value != null) {
-            incrementMeta("l2-hits");
-            l1Cache.put(l1Key, l2Value.toString());
-            checkAndTriggerRefresh(key);
-            return l2Value.toString();
-        }
-
-        incrementMeta("db-misses");
-        return loadFromDb(key);
-    }
-
-    /**
-     * Evaluates the entry's age against the configured TTL threshold. If the
-     * entry is in the refresh zone (age between threshold% and 100% of TTL),
-     * triggers an async refresh. If fully expired, evicts from L2 + L1.
-     *
-     * @param key the cache key to check
-     */
-    private void checkAndTriggerRefresh(String key) {
-        Object tsObj = redisTemplate.opsForHash().get(TTL_KEY, key);
-        if (tsObj == null) {
-            return;
-        }
-        long writeTime = Long.parseLong(tsObj.toString());
-        long ageMs = System.currentTimeMillis() - writeTime;
-        long ttlMs = ttlSeconds * 1000;
-        long thresholdMs = ttlMs * thresholdPercent / 100;
-
-        if (ageMs > thresholdMs && ageMs < ttlMs) {
-            triggerAsyncRefresh(key);
-        } else if (ageMs >= ttlMs) {
-            redisTemplate.opsForHash().delete(L2_KEY, key);
-            redisTemplate.opsForHash().delete(TTL_KEY, key);
-            l1Cache.invalidate(PATTERN + ":" + key);
-            incrementMeta("expired-evictions");
-            log.info("REFRESH-AHEAD: key={} expired (age={}ms > ttl={}ms)", key, ageMs, ttlMs);
-        }
-    }
-
-    /**
-     * <pre>
-     * +------------------------------------------------------------+
-     * |  Trigger Async Refresh                                     |
-     * +------------------------------------------------------------+
-     * |  Submits a background task to reload the value from DB     |
-     * |  and update L2 + L1 + TTL timestamp. Uses a               |
-     * |  {@link ConcurrentHashMap} as an in-flight guard so only  |
-     * |  one refresh runs per key at a time.                       |
-     * +------------------------------------------------------------+
-     * </pre>
-     *
-     * <p>Async refresh flow:
-     * <pre>
-     *  +----------+  putIfAbsent  +---------------+
-     *  | Trigger  |---------------&gt;| refreshInFlight|
-     *  +----------+               +-------+-------+
-     *       |                       new?  | duplicate?
-     *       |                    +--------+    skip
-     *       |                    |
-     *  +----v-----+  submit  +---v------+  SELECT  +------------+
-     *  | Executor |&lt;---------|  Worker  |&lt;---------| PostgreSQL |
-     *  +----------+          +---+------+          +------------+
-     *                            |
-     *                  update L2 + L1 + TTL
-     *                  remove from inFlight
-     * </pre>
-     *
-     * @param key the cache key to refresh in the background
-     */
-    private void triggerAsyncRefresh(String key) {
-        if (refreshInFlight.putIfAbsent(key, Boolean.TRUE) != null) {
-            return;
-        }
-        incrementMeta("refresh-triggers");
-        log.info("REFRESH-AHEAD: async refresh triggered for key={}", key);
-        executor.submit(() -> {
-            try {
-                String value = database.read(PATTERN, key);
-                if (value != null) {
-                    redisTemplate.opsForHash().put(L2_KEY, key, value);
-                    l1Cache.put(PATTERN + ":" + key, value);
-                    redisTemplate.opsForHash().put(TTL_KEY, key,
-                            String.valueOf(System.currentTimeMillis()));
-                }
-            } finally {
-                refreshInFlight.remove(key);
-            }
-        });
-    }
-
-    /**
-     * Loads a value directly from DB and populates L2, L1, and the TTL
-     * timestamp hash.
-     *
-     * @param key the cache key to load
-     * @return the value, or {@code null} if not found in DB
-     */
-    private String loadFromDb(String key) {
-        String value = database.read(PATTERN, key);
+        String value = caffeineL1Cache.get(l1Key);
         if (value != null) {
-            redisTemplate.opsForHash().put(L2_KEY, key, value);
-            l1Cache.put(PATTERN + ":" + key, value);
-            redisTemplate.opsForHash().put(TTL_KEY, key,
-                    String.valueOf(System.currentTimeMillis()));
+            incrementMeta("hits");
+            log.info("REFRESH-AHEAD read: key={} (Caffeine managed)", key);
+        } else {
+            incrementMeta("misses");
         }
         return value;
     }
 
-    /**
-     * Returns a simplified {@link CacheStateResponse} for compatibility with
-     * the {@link com.example.redis.service.CacheService} state model.
-     *
-     * @return current cache state snapshot
-     */
     @Override
     public CacheStateResponse getState() {
         CachingPatternStateResponse state = buildState();
@@ -307,36 +171,19 @@ public class RefreshAheadCacheService implements CachingPatternService {
                 .capacity(-1)
                 .currentSize(state.getCacheSize())
                 .entries(state.getCacheEntries())
-                .evictionOrder("L1(Caffeine)->L2(Redis)->DB(PostgreSQL)")
+                .evictionOrder("Caffeine LoadingCache(auto-refresh)->L2(Redis)->DB")
                 .build();
     }
 
-    /**
-     * Builds the full pattern state including L2 cache entries (with age in seconds),
-     * DB entries, and metadata (TTL config, threshold percent, refresh window,
-     * refresh trigger count, expired evictions, L1 stats).
-     *
-     * @return complete {@link CachingPatternStateResponse} with all tiers
-     */
     @Override
     public CachingPatternStateResponse buildState() {
         Map<Object, Object> l2Entries = redisTemplate.opsForHash().entries(L2_KEY);
         Map<Object, Object> dbEntries = database.readAll(PATTERN);
         Map<Object, Object> meta = redisTemplate.opsForHash().entries(META_KEY);
-        Map<Object, Object> ttlEntries = redisTemplate.opsForHash().entries(TTL_KEY);
 
         List<CacheEntry> cacheList = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        l2Entries.forEach((k, v) -> {
-            Object ts = ttlEntries.get(k);
-            Double ageSeconds = ts != null
-                    ? (now - Long.parseLong(ts.toString())) / 1000.0 : null;
-            cacheList.add(CacheEntry.builder()
-                    .key(k.toString())
-                    .value(v.toString())
-                    .score(ageSeconds)
-                    .build());
-        });
+        l2Entries.forEach((k, v) -> cacheList.add(
+                CacheEntry.builder().key(k.toString()).value(v.toString()).build()));
 
         Map<String, String> dbMap = new LinkedHashMap<>();
         dbEntries.forEach((k, v) -> dbMap.put(k.toString(), v.toString()));
@@ -345,58 +192,37 @@ public class RefreshAheadCacheService implements CachingPatternService {
         meta.forEach((k, v) -> metaMap.put(k.toString(), v));
         metaMap.put("ttlSeconds", ttlSeconds);
         metaMap.put("thresholdPercent", thresholdPercent);
-        metaMap.put("refreshWindowSeconds", ttlSeconds * (100 - thresholdPercent) / 100);
-        metaMap.put("l1-estimated-size", l1Cache.estimatedSize());
-        metaMap.put("l1-stats", l1Cache.stats().toString());
+        metaMap.put("refreshAfterWriteSeconds", ttlSeconds * thresholdPercent / 100);
+        metaMap.put("l1-estimated-size", caffeineL1Cache.estimatedSize());
+        metaMap.put("l1-stats", caffeineL1Cache.stats().toString());
 
         return CachingPatternStateResponse.builder()
-                .pattern("Refresh-Ahead")
-                .description("Proactively refreshes entries in the last "
-                        + (100 - thresholdPercent) + "% of TTL. "
-                        + "L1(Caffeine)->L2(Redis)->DB. Hot keys never see miss latency.")
+                .pattern("Refresh-Ahead (Caffeine LoadingCache)")
+                .description("Uses Caffeine refreshAfterWrite() for automatic async refresh. "
+                        + "Expire=" + ttlSeconds + "s, Refresh=" + (ttlSeconds * thresholdPercent / 100) + "s.")
                 .cacheSize(l2Entries.size())
                 .dbSize(dbEntries.size())
                 .cacheEntries(cacheList)
                 .dbEntries(dbMap)
                 .metadata(metaMap)
                 .asciiDiagram(
-                        "READ:  App->L1[HIT]->return\n"
-                        + "       App->L1[MISS]->L2[HIT, age<80% TTL]->L1->return\n"
-                        + "       App->L1[MISS]->L2[HIT, age>80% TTL]->L1->return"
-                        + " + async{DB->L2+L1}\n"
-                        + "       App->L1[MISS]->L2[MISS]->DB->L2+L1->return\n"
-                        + "WRITE: App->DB->L2+L1+TTL timestamp")
+                        "READ: App->Caffeine.get()->[fresh]->return | "
+                                + "[stale]->return+async reload | [miss]->loader(L2->DB)")
                 .build();
     }
 
-    /**
-     * Clears L2 (Redis hash), TTL hash, metadata counters, and all L1 (Caffeine) entries.
-     */
     @Override
     public void clear() {
         redisTemplate.delete(L2_KEY);
-        redisTemplate.delete(TTL_KEY);
         redisTemplate.delete(META_KEY);
-        l1Cache.invalidateAll();
+        caffeineL1Cache.invalidateAll();
     }
 
-    /**
-     * Reads a value directly from the simulated PostgreSQL database, bypassing
-     * all cache tiers.
-     *
-     * @param key the key to look up in the database
-     * @return the value, or {@code null} if not found
-     */
     @Override
     public String getFromDb(String key) {
         return database.read(PATTERN, key);
     }
 
-    /**
-     * Returns all entries currently stored in the simulated database for this pattern.
-     *
-     * @return ordered map of all database key-value pairs
-     */
     @Override
     public Map<String, String> getDbState() {
         Map<String, String> result = new LinkedHashMap<>();
@@ -404,11 +230,6 @@ public class RefreshAheadCacheService implements CachingPatternService {
         return result;
     }
 
-    /**
-     * Seeds the simulated database with the given entries, bypassing cache.
-     *
-     * @param entries key-value pairs to insert into the database
-     */
     @Override
     public void seedDb(Map<String, String> entries) {
         database.seed(PATTERN, entries);
