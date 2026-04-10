@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: redis-sorted-set
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: -1ms
+  datasource:
+    url: jdbc:postgresql://pg-1d9d15dc-vishal210893-5985.h.aivencloud.com:28832/defaultdb?sslmode=require
+    username: avnadmin
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+app:
+  cache:
+    lru-capacity: 5
+    lfu-capacity: 5
+  caching:
+    executor-pool-size: 4
+    caffeine:
+      max-size: 100
+      expire-after-write-seconds: 300
+    write-back:
+      flush-interval-seconds: 10
+    refresh-ahead:
+      ttl-seconds: 60
+      threshold-percent: 80
